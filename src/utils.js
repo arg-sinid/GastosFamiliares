@@ -1,3 +1,5 @@
+import { categorizarUno } from './categorias.js';
+
 export const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 export const n=v=>parseFloat(String(v??'').replace(',','.'))||0;
 export const $$=v=>{if(v===''||v===null||v===undefined||isNaN(v))return'—';return new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(v);};
@@ -67,9 +69,22 @@ export const calcularGastosFijos = (monthly, gastosRecurrentes, totalesTarjetas,
   }, 0);
 };
 
-// Junta los gastos cargados vía Zapia (WhatsApp) y los consumos clasificados de Tarjetas
-// de un mes, y los agrupa por categoría. Se reusa en Gastos y en Cierre Real para que
-// ambas pantallas muestren siempre el mismo criterio de agrupación.
+// Igual que calcularGastosFijos pero SIN incluir icbc/bna (para Cierre Real,
+// donde los gastos de tarjeta ya están contados en agruparGastosPorCategoria).
+export const calcularGastosFijosSinTarjetas = (monthly, gastosRecurrentes, mesKey) => {
+  const s   = monthly?.[mesKey] || {};
+  const rec = gastosRecurrentes || {};
+  const keysSinTarjetas = GASTOS_FIJOS_KEYS.filter(k => k !== 'icbc' && k !== 'bna');
+  return keysSinTarjetas.reduce((sum, key) => {
+    const val = s.gastos?.[key] !== undefined && s.gastos?.[key] !== '' ? s.gastos[key] : (rec[key] || '');
+    return sum + n(val);
+  }, 0);
+};
+
+// Junta los gastos cargados via Zapia (WhatsApp) y TODOS los movimientos de Tarjetas
+// de un mes, y los agrupa por categoria usando las mismas categorias para ambos.
+// Cuotas van a "Cuotas", financieros a "Pagos/Impuestos/Intereses", y el resto se
+// categoriza con las reglas compartidas (categorias guardadas o categorizarUno).
 export const agruparGastosPorCategoria = (zapiaData, tarjetasData, categories, dolarTarjetaMap, mesKey, tiposFinancieros) => {
   const zapiaItems = (zapiaData||[])
     .filter(r => r.fecha && monthOf(r.fecha) === mesKey)
@@ -77,17 +92,27 @@ export const agruparGastosPorCategoria = (zapiaData, tarjetasData, categories, d
 
   const tarjetaItems = (tarjetasData||[])
     .filter(m => m.mes === mesKey)
-    .filter(m => !(m.cuotas && m.cuotas.trim() !== '') && !(tiposFinancieros||[]).includes(m.tipoMovimiento))
     .map(m => {
       const dolar = n(dolarTarjetaMap?.[m.mes]) || 0;
       const monto = m.moneda === 'USD' ? m.importe * dolar : m.importe;
-      return { key:m.comercio, monto, fecha:m.fecha, tarjeta:m.tarjeta, origen:'tarjeta' };
+      return { key:m.comercio, monto, fecha:m.fecha, tarjeta:m.tarjeta, cuotas:m.cuotas, tipoMovimiento:m.tipoMovimiento, origen:'tarjeta' };
     });
 
   const items  = [...zapiaItems, ...tarjetaItems];
   const grupos = {};
   items.forEach(item => {
-    const cat = categories[item.key] || { categoria:'Sin categoría', emoji:'📦' };
+    let cat;
+    if (item.origen === 'tarjeta') {
+      if (item.cuotas && item.cuotas.trim() !== '') {
+        cat = { categoria: 'Cuotas', emoji: '\uD83E\uDD9E' };
+      } else if ((tiposFinancieros||[]).includes(item.tipoMovimiento)) {
+        cat = { categoria: 'Pagos/Impuestos/Intereses', emoji: '\uD83D\uDCB0' };
+      } else {
+        cat = categories[item.key] || categorizarUno(item.key);
+      }
+    } else {
+      cat = categories[item.key] || categorizarUno(item.key);
+    }
     if (!grupos[cat.categoria]) grupos[cat.categoria] = { emoji:cat.emoji, items:[], total:0 };
     grupos[cat.categoria].items.push(item);
     grupos[cat.categoria].total += item.monto;

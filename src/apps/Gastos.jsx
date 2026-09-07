@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { $$, n, getKey, fmtKey, getMonday, weekDates, dateStr, monthOf, fmtDate, monthOpts } from '../utils.js';
-import { TODAS_CATEGORIAS, categorizarNuevos, TIPOS_FINANCIEROS } from '../categorias.js';
+import { TODAS_CATEGORIAS, categorizarNuevos, categorizarUno, TIPOS_FINANCIEROS } from '../categorias.js';
 
 function CatModal({ item, items, categorias, onSave, onClose }) {
   const [customName,  setCustomName]  = useState('');
@@ -158,13 +158,13 @@ export default function Gastos({ zapiaData, appData, saveData, loading, movimien
     .map(r => ({ key:r.que, monto:r.costo, fecha:r.fecha, quien:r.quien, medio:r.medio, origen:'zapia' }));
 
   // Ítems de Tarjeta (solo en vista de mes, y solo consumos reales — sin cuotas ni financieros)
+  // Items de Tarjeta (solo en vista de mes, TODOS los movimientos incluyendo cuotas y financieros)
   const tarjetaItems = filtro === 'mes' ? (movimientos || [])
     .filter(m => m.mes === selMes)
-    .filter(m => !(m.cuotas && m.cuotas.trim() !== '') && !TIPOS_FINANCIEROS.includes(m.tipoMovimiento))
     .map(m => {
       const dolar = n(dolarTarjetaMap[m.mes]) || 0;
       const monto = m.moneda === 'USD' ? m.importe * dolar : m.importe;
-      return { key:m.comercio, monto, fecha:m.fecha, tarjeta:m.tarjeta, origen:'tarjeta' };
+      return { key:m.comercio, monto, fecha:m.fecha, tarjeta:m.tarjeta, cuotas:m.cuotas, tipoMovimiento:m.tipoMovimiento, origen:'tarjeta' };
     }) : [];
 
   const filtered = [...zapiaItems, ...tarjetaItems];
@@ -176,12 +176,29 @@ export default function Gastos({ zapiaData, appData, saveData, loading, movimien
 
   const grupos = {};
   filtered.forEach(item=>{
-    const cat = categories[item.key]||{categoria:'Sin categoría',emoji:'📦'};
+    let cat;
+    if (item.origen === 'tarjeta') {
+      if (item.cuotas && item.cuotas.trim() !== '') {
+        cat = { categoria: 'Cuotas', emoji: '\uD83E\uDD9E' };
+      } else if (TIPOS_FINANCIEROS.includes(item.tipoMovimiento)) {
+        cat = { categoria: 'Pagos/Impuestos/Intereses', emoji: '\uD83D\uDCB0' };
+      } else {
+        cat = categories[item.key] || categorizarUno(item.key);
+      }
+    } else {
+      cat = categories[item.key] || categorizarUno(item.key);
+    }
     if(!grupos[cat.categoria]) grupos[cat.categoria]={emoji:cat.emoji,items:[],total:0};
     grupos[cat.categoria].items.push(item); grupos[cat.categoria].total+=item.monto;
   });
   const sortedGrupos = Object.entries(grupos).sort((a,b)=>b[1].total-a[1].total);
-  const sinCat = filtered.filter(r=>!categories[r.key]);
+  const sinCat = filtered.filter(r => {
+    if (r.origen === 'tarjeta') {
+      if (r.cuotas && r.cuotas.trim() !== '') return false;
+      if (TIPOS_FINANCIEROS.includes(r.tipoMovimiento)) return false;
+    }
+    return !categories[r.key];
+  });
 
   const recategorizar = async (keys, newCat) => {
     setEditItem(null);
@@ -326,7 +343,11 @@ export default function Gastos({ zapiaData, appData, saveData, loading, movimien
                           <span>{item.medio==='efectivo'?'💵':'📲'}</span>
                         </>
                       ) : (
-                        <span style={{background:'#EDE9FE',color:'#553C9A',borderRadius:4,padding:'1px 5px',fontWeight:700}}>💳 {item.tarjeta}</span>
+                        <>
+                          <span style={{background:'#EDE9FE',color:'#553C9A',borderRadius:4,padding:'1px 5px',fontWeight:700}}>💳 {item.tarjeta}</span>
+                          {item.cuotas && <span style={{fontSize:10,background:'#EDE9FE',color:'#553C9A',borderRadius:4,padding:'1px 5px',fontWeight:700}}>{item.cuotas}</span>}
+                          {item.tipoMovimiento && TIPOS_FINANCIEROS.includes(item.tipoMovimiento) && <span style={{fontSize:10,background:'#FED7AA',color:'#744210',borderRadius:4,padding:'1px 5px',fontWeight:700}}>{item.tipoMovimiento}</span>}
+                        </>
                       )}
                       <span>{item.fecha.split('-').reverse().join('/')}</span>
                       {!selectionMode && <button onClick={()=>setEditItem(item)}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { $$, n, getKey, fmtKey, monthOpts, calcularGastosFijos, calcularTotalesTarjetas, agruparGastosPorCategoria } from '../utils.js';
+import { $$, n, getKey, fmtKey, monthOpts, calcularGastosFijosSinTarjetas, calcularTotalesTarjetas, agruparGastosPorCategoria } from '../utils.js';
 import { TIPOS_FINANCIEROS } from '../categorias.js';
 
 function LineaInfo({ label, valor, color, sub, bold }) {
@@ -37,7 +37,7 @@ export default function CierreReal({ appData, zapiaData, tarjetasData, onRefresh
   const sueldoJulieta = n(monthly[selKey]?.ingresos?.julieta);
   const ingresos      = brutoGanancias + sueldoJulieta;
 
-  const fijos = calcularGastosFijos(monthly, gastosRecurrentes, totalesTarjetas, selKey);
+  const fijos = calcularGastosFijosSinTarjetas(monthly, gastosRecurrentes, selKey);
 
   const { grupos, total: totalGastos } = agruparGastosPorCategoria(
     zapiaData, tarjetasData, categories, dolarTarjetaMap, selKey, TIPOS_FINANCIEROS
