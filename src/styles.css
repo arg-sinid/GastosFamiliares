@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+/*
+  Tokens de diseño de GastosFamiliares.
+  Cambiar un color acá se propaga a toda la app — ya no hay que
+  buscar hex sueltos en cada archivo.
+*/
+@theme {
+  --font-sans: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
+
+  /* Base */
+  --color-ink:          #1C2530; /* texto fuerte / fondos oscuros */
+  --color-paper:        #F6F4F0; /* fondo de página */
+  --color-card:         #FFFFFF; /* fondo de tarjetas */
+  --color-border:       #E2DDD3; /* borde default */
+  --color-border-soft:  #EFEBE3; /* separador sutil dentro de tarjetas */
+  --color-muted:        #6B6459; /* texto secundario */
+  --color-muted-light:  #A39B8C; /* texto terciario / hints */
+
+  /* Acento (cobre — acción, foco) */
+  --color-accent:        #C2703D;
+  --color-accent-soft:   #F2E3D6;
+  --color-accent-strong: #8A4A20;
+
+  /* Semánticos */
+  --color-positive:      #2F7A52;
+  --color-positive-soft: #EAF3DE;
+  --color-negative:      #B54834;
+  --color-negative-soft: #FCEBEB;
+
+  /* Identidad personal (usado en Control, Principal, Ganancias) */
+  --color-german:  #2F7A52; /* mismo verde que "positive" — Germán = ingresos */
+  --color-julieta: #C24E85;
+
+  /* Identidad por pestaña (se mantiene el sistema existente, prolijo) */
+  --color-tab-principal:  #1A365D;
+  --color-tab-control:    #2D3748;
+  --color-tab-gastos:     #744210;
+  --color-tab-tarjetas:   #2B6CB0;
+  --color-tab-ganancias:  #1A4731;
+  --color-tab-cierre:     #6B21A8;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-paper);
+  color: var(--color-ink);
+}

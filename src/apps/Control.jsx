@@ -4,14 +4,13 @@ import { $$, n, getKey, getMonday, weekDates, dateStr, monthOf, fmtDate } from '
 function ResultadoCard({ label, valor }) {
   const ok = valor >= 0;
   return (
-    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
-                  padding:'11px 16px', background: ok ? '#F0FFF4' : '#FFF5F5', borderTop:'2px solid #EDF2F7' }}>
+    <div className={`flex justify-between items-center px-4 py-2.5 border-t-2 border-border-soft ${ok ? 'bg-positive-soft' : 'bg-negative-soft'}`}>
       <div>
-        <div style={{ fontSize:13, fontWeight:700, color: ok ? '#276749' : '#C53030' }}>{label}</div>
-        {!ok && <div style={{ fontSize:11, color:'#C53030', marginTop:2 }}>Gasto hormiga — plata no registrada</div>}
-        {ok && <div style={{ fontSize:11, color:'#276749', marginTop:2 }}>✓ OK</div>}
+        <div className={`text-[13px] font-bold ${ok ? 'text-positive' : 'text-negative'}`}>{label}</div>
+        {!ok && <div className="text-[11px] text-negative mt-0.5">Gasto hormiga — plata no registrada</div>}
+        {ok && <div className="text-[11px] text-positive mt-0.5">✓ OK</div>}
       </div>
-      <div style={{ fontSize:20, fontWeight:900, color: ok ? '#276749' : '#C53030' }}>
+      <div className={`text-xl font-extrabold tabular-nums ${ok ? 'text-positive' : 'text-negative'}`}>
         {ok ? $$(valor) : `-${$$(Math.abs(valor))}`}
       </div>
     </div>
@@ -20,11 +19,9 @@ function ResultadoCard({ label, valor }) {
 
 function LineaInfo({ label, valor, color, sub }) {
   return (
-    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
-                  padding: sub ? '6px 16px 6px 28px' : '9px 16px', borderTop:'1px solid #EDF2F7',
-                  background: sub ? '#FAFAFA' : '#fff' }}>
-      <span style={{ fontSize: sub ? 12 : 13, color:'#718096' }}>{label}</span>
-      <span style={{ fontSize:13, fontWeight:700, color: color||'#2D3748' }}>{$$(valor)}</span>
+    <div className={`flex justify-between items-center border-t border-border-soft ${sub ? 'pl-7 pr-4 py-1.5 bg-[#FAFAFA]' : 'px-4 py-2.5 bg-white'}`}>
+      <span className={`${sub ? 'text-xs' : 'text-[13px]'} text-muted`}>{label}</span>
+      <span className="text-[13px] font-bold tabular-nums" style={{ color: color || 'var(--color-ink)' }}>{$$(valor)}</span>
     </div>
   );
 }
@@ -93,90 +90,82 @@ export default function Control({ appData, saveData, zapiaData, onRefresh }) {
   const isCurrentWeek = sundayStr === dateStr(weekDates(getMonday(today))[6]);
 
   return (
-    <div style={{ maxWidth:640, margin:'0 auto', padding:16, background:'#F7FAFC',
-                  minHeight:'calc(100vh - 70px)', fontFamily:'Segoe UI,Arial,sans-serif' }}>
-      <div style={{ background:'linear-gradient(135deg,#2D3748,#4A5568)', borderRadius:16,
-                    padding:'18px 20px', marginBottom:18, color:'#fff', boxShadow:'0 4px 16px rgba(45,55,72,0.3)',
-                    display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+    <div className="max-w-[640px] mx-auto p-4 bg-paper min-h-[calc(100vh-70px)]">
+      <div className="rounded-2xl px-5 py-4.5 mb-4.5 text-white shadow-md flex justify-between items-center bg-tab-control">
         <div>
-          <div style={{ fontSize:21, fontWeight:800, letterSpacing:-.5 }}>📊 Control</div>
-          <div style={{ fontSize:12, opacity:.75, marginTop:3 }}>Seguimiento semanal de flujo de dinero</div>
+          <div className="text-xl font-extrabold tracking-tight">📊 Control</div>
+          <div className="text-xs opacity-75 mt-0.5">Seguimiento semanal de flujo de dinero</div>
         </div>
         <button onClick={handleRefresh} disabled={refreshing}
-          style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',borderRadius:9,color:'white',
-                  padding:'7px 11px',cursor:'pointer',fontSize:12,fontWeight:700,touchAction:'manipulation'}}>
+          className="bg-white/15 border border-white/30 rounded-lg text-white px-2.5 py-1.5 cursor-pointer text-xs font-bold touch-manipulation">
           {refreshing ? '...' : '↻'}
         </button>
       </div>
 
-      <div style={{ display:'flex', background:'#E2E8F0', borderRadius:12, padding:4, marginBottom:14, gap:3 }}>
+      <div className="flex bg-border-soft rounded-xl p-1 mb-3.5 gap-0.5">
         {[['semana','📅 Semana'],['mes','🗓️ Este mes']].map(([k,label]) => (
-          <button key={k} onClick={() => setFiltro(k)} style={{ flex:1, padding:'9px 0', border:'none',
-            borderRadius:9, cursor:'pointer', fontWeight:700, fontSize:13,
-            background:filtro===k?'#fff':'transparent', color:filtro===k?'#2D3748':'#718096',
-            boxShadow:filtro===k?'0 1px 4px rgba(0,0,0,0.1)':'none', touchAction:'manipulation' }}>{label}</button>
+          <button key={k} onClick={() => setFiltro(k)}
+            className={`flex-1 py-2.5 border-none rounded-lg cursor-pointer font-bold text-[13px] touch-manipulation transition-colors
+              ${filtro===k ? 'bg-white text-ink shadow-sm' : 'bg-transparent text-muted'}`}>{label}</button>
         ))}
       </div>
 
       {filtro === 'semana' && (
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
-                      background:'#fff', borderRadius:12, padding:'10px 16px', marginBottom:14, boxShadow:'0 1px 4px rgba(0,0,0,0.08)' }}>
-          <button onClick={prevWeek} style={{ border:'none', background:'none', cursor:'pointer', fontSize:22, color:'#4A5568', padding:'0 8px', touchAction:'manipulation' }}>‹</button>
-          <div style={{ textAlign:'center' }}>
-            <div style={{ fontWeight:700, color:'#2D3748', fontSize:14 }}>{fmtDate(wDates[0])} – {fmtDate(wDates[6])}</div>
-            {isCurrentWeek && <div style={{ fontSize:11, color:'#A0AEC0' }}>Semana actual</div>}
+        <div className="flex items-center justify-between bg-white rounded-xl px-4 py-2.5 mb-3.5 shadow-sm">
+          <button onClick={prevWeek} className="border-none bg-none cursor-pointer text-2xl text-muted px-2 touch-manipulation">‹</button>
+          <div className="text-center">
+            <div className="font-bold text-ink text-sm">{fmtDate(wDates[0])} – {fmtDate(wDates[6])}</div>
+            {isCurrentWeek && <div className="text-[11px] text-muted-light">Semana actual</div>}
           </div>
-          <button onClick={nextWeek} style={{ border:'none', background:'none', cursor:'pointer', fontSize:22, color:'#4A5568', padding:'0 8px', touchAction:'manipulation' }}>›</button>
+          <button onClick={nextWeek} className="border-none bg-none cursor-pointer text-2xl text-muted px-2 touch-manipulation">›</button>
         </div>
       )}
 
-      <div style={{ background:'#fff', borderRadius:14, overflow:'hidden', marginBottom:14, boxShadow:'0 1px 4px rgba(0,0,0,0.08)' }}>
-        <div style={{ background:'#276749', color:'#fff', padding:'10px 16px', fontWeight:700, fontSize:13 }}>👨 Germán</div>
+      <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
+        <div className="bg-german text-white px-4 py-2.5 font-bold text-[13px]">👨 Germán</div>
         {brutoUD > 0 ? <>
-          <LineaInfo label="Bruto Uber/DiDi" valor={brutoUD} color="#276749"/>
-          <LineaInfo label="Transferido a Julieta" valor={transferido} color="#2B6CB0"/>
-          <LineaInfo label="Efectivo en mano" valor={efectivo} color="#276749"/>
-          {efectivo === 0 && <div style={{ padding:'7px 16px', fontSize:11, color:'#A0AEC0', borderTop:'1px solid #EDF2F7' }}>Sin efectivo registrado {filtro==='semana'?'este domingo':'este mes'}.</div>}
-          <LineaInfo label="Gastos Zapia de Germán" valor={gastosZapiaGerm} color="#744210"/>
+          <LineaInfo label="Bruto Uber/DiDi" valor={brutoUD} color="var(--color-german)"/>
+          <LineaInfo label="Transferido a Julieta" valor={transferido} color="var(--color-tab-tarjetas)"/>
+          <LineaInfo label="Efectivo en mano" valor={efectivo} color="var(--color-german)"/>
+          {efectivo === 0 && <div className="px-4 py-1.5 text-[11px] text-muted-light border-t border-border-soft">Sin efectivo registrado {filtro==='semana'?'este domingo':'este mes'}.</div>}
+          <LineaInfo label="Gastos Zapia de Germán" valor={gastosZapiaGerm} color="var(--color-tab-gastos)"/>
           <ResultadoCard label="Resultado Germán" valor={resultadoGerman}/>
         </> : (
-          <div style={{ padding:'20px', textAlign:'center', color:'#A0AEC0', fontSize:13 }}>
-            Sin ganancias registradas {filtro==='semana'?'esta semana':'este mes'}.<br/><span style={{ fontSize:11 }}>Cargalas desde <strong>Ganancias</strong>.</span>
+          <div className="p-5 text-center text-muted-light text-[13px]">
+            Sin ganancias registradas {filtro==='semana'?'esta semana':'este mes'}.<br/><span className="text-[11px]">Cargalas desde <strong>Ganancias</strong>.</span>
           </div>
         )}
       </div>
 
-      <div style={{ background:'#fff', borderRadius:14, overflow:'hidden', marginBottom:14, boxShadow:'0 1px 4px rgba(0,0,0,0.08)' }}>
-        <div style={{ background:'#D53F8C', color:'#fff', padding:'10px 16px', fontWeight:700, fontSize:13 }}>👩 Julieta</div>
-        <LineaInfo label="Transferido a Julieta" valor={transferido} color="#2B6CB0"/>
-        <LineaInfo label="Gastos Zapia via transferencia" valor={gastosZapiaJuli} color="#744210"/>
-        <div style={{ padding:'12px 16px', borderTop:'1px solid #EDF2F7' }}>
-          <div style={{ fontSize:12, color:'#718096', marginBottom:8, fontWeight:600 }}>
+      <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
+        <div className="bg-julieta text-white px-4 py-2.5 font-bold text-[13px]">👩 Julieta</div>
+        <LineaInfo label="Transferido a Julieta" valor={transferido} color="var(--color-tab-tarjetas)"/>
+        <LineaInfo label="Gastos Zapia via transferencia" valor={gastosZapiaJuli} color="var(--color-tab-gastos)"/>
+        <div className="px-4 py-3 border-t border-border-soft">
+          <div className="text-xs text-muted mb-2 font-semibold">
             💳 Saldo real en cuenta — {filtro==='semana' ? `domingo ${fmtDate(sunday)}` : `último domingo del mes`}
           </div>
           {saldoJuli > 0 && !saldoJuliInput && (
-            <div style={{ fontSize:14, fontWeight:700, color:'#2D3748', marginBottom:8 }}>
+            <div className="text-sm font-bold text-ink mb-2">
               Registrado: {$$(saldoJuli)}
               <button onClick={() => setSaldoJuliInput(String(saldoJuli))}
-                style={{ marginLeft:10, border:'none', background:'#EDF2F7', borderRadius:6, cursor:'pointer', fontSize:11, color:'#718096', padding:'2px 8px', touchAction:'manipulation' }}>editar</button>
+                className="ml-2.5 border-none bg-border-soft rounded-md cursor-pointer text-[11px] text-muted px-2 py-0.5 touch-manipulation">editar</button>
             </div>
           )}
-          <div style={{ display:'flex', gap:8 }}>
-            <div style={{ flex:1, display:'flex', alignItems:'center', background:'#FAFAFA', borderRadius:10,
-                          border:`1.5px solid ${saldoJuliInput?'#D53F8C':'#E2E8F0'}`, padding:'6px 12px', gap:4 }}>
-              <span style={{ color:'#A0AEC0', fontWeight:600 }}>$</span>
+          <div className="flex gap-2">
+            <div className={`flex-1 flex items-center bg-[#FAFAFA] rounded-lg border-[1.5px] px-3 py-1.5 gap-1 ${saldoJuliInput?'border-julieta':'border-border'}`}>
+              <span className="text-muted-light font-semibold">$</span>
               <input type="number" inputMode="numeric" min="0" value={saldoJuliInput}
                 onChange={e => setSaldoJuliInput(e.target.value)} placeholder="0"
-                style={{ flex:1, border:'none', outline:'none', fontSize:18, fontWeight:700, color:'#1A365D', background:'transparent' }}/>
+                className="flex-1 border-none outline-none text-lg font-bold text-ink bg-transparent tabular-nums"/>
             </div>
             <button onClick={guardarSaldoJuli} disabled={!saldoJuliInput || saving}
-              style={{ padding:'8px 16px', border:'none', borderRadius:10, cursor:'pointer', fontWeight:700, fontSize:13, color:'#fff',
-                       background: saving ? '#A0AEC0' : '#D53F8C', touchAction:'manipulation' }}>{saving ? '...' : 'Guardar'}</button>
+              className={`px-4 py-2 border-none rounded-lg cursor-pointer font-bold text-[13px] text-white touch-manipulation ${saving ? 'bg-muted-light' : 'bg-julieta'}`}>{saving ? '...' : 'Guardar'}</button>
           </div>
-          <div style={{ fontSize:11, color:'#A0AEC0', marginTop:6 }}>Lo carga Julieta el domingo o al cierre del mes.</div>
+          <div className="text-[11px] text-muted-light mt-1.5">Lo carga Julieta el domingo o al cierre del mes.</div>
         </div>
         {(transferido > 0 || gastosZapiaJuli > 0 || saldoJuli > 0) && <ResultadoCard label="Resultado Julieta" valor={resultadoJulieta}/>}
-        {transferido === 0 && <div style={{ padding:'16px', textAlign:'center', color:'#A0AEC0', fontSize:13 }}>Sin transferencias registradas {filtro==='semana'?'esta semana':'este mes'}.</div>}
+        {transferido === 0 && <div className="p-4 text-center text-muted-light text-[13px]">Sin transferencias registradas {filtro==='semana'?'esta semana':'este mes'}.</div>}
       </div>
     </div>
   );

@@ -3,23 +3,18 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Cart
 import { $$, n, fmtKey, getKey, monthOpts } from '../utils.js';
 import { categorizarUno, TODAS_CATEGORIAS, emojiCorrectoParaCategoria, TIPOS_FINANCIEROS } from '../categorias.js';
 
+// Los charts de recharts necesitan valores hex reales (no clases), así que
+// repetimos acá los mismos tonos definidos en src/styles.css.
 const TARJETAS_CONFIG = {
-  ICBC: { nombre:'Tarjeta ICBC',        color:'#553C9A', icon:'💳', key:'icbc' },
+  ICBC: { nombre:'Tarjeta ICBC',        color:'#6B21A8', icon:'💳', key:'icbc' },
   BNA:  { nombre:'Tarjeta Banco Nación', color:'#2B6CB0', icon:'💳', key:'bna'  },
 };
 
-// (TIPOS_FINANCIEROS ahora se importa de categorias.js, compartido con Gastos.jsx)
-
-// ── Vista detalle de una tarjeta ───────────────────────────────────────
 function DetalleTarjeta({ movimientos, config, dolarTarjeta, categorias, setCategoria, onBack }) {
   const [expanded, setExpanded] = useState({});
 
   const montoEnPesos = (m) => m.moneda === 'USD' ? m.importe * dolarTarjeta : m.importe;
 
-  // Prioridad de clasificación:
-  // 1. Tiene cuotas → siempre va a "Cuotas", sin importar de qué sea o su tipo_movimiento
-  // 2. Sin cuotas + tipo financiero (pago/interes/impuesto/comision) → "Pagos/Impuestos/Intereses"
-  // 3. El resto → categorización normal por rubro
   const cuotasItems     = movimientos.filter(m => m.cuotas && m.cuotas.trim() !== '');
   const financierosItems= movimientos.filter(m => (!m.cuotas || m.cuotas.trim()==='') && TIPOS_FINANCIEROS.includes(m.tipoMovimiento));
   const consumos        = movimientos.filter(m => (!m.cuotas || m.cuotas.trim()==='') && !TIPOS_FINANCIEROS.includes(m.tipoMovimiento));
@@ -29,7 +24,6 @@ function DetalleTarjeta({ movimientos, config, dolarTarjeta, categorias, setCate
   const totalConsumos    = consumos.reduce((s,m) => s + montoEnPesos(m), 0);
   const totalGeneral     = totalCuotas + totalFinancieros + totalConsumos;
 
-  // Agrupar consumos por categoría (propia, no la de Zapia)
   const grupos = {};
   consumos.forEach(m => {
     const cat = categorias[m.comercio] || categorizarUno(m.comercio);
@@ -41,83 +35,76 @@ function DetalleTarjeta({ movimientos, config, dolarTarjeta, categorias, setCate
   const sortedGrupos = Object.entries(grupos).sort((a,b) => b[1].total - a[1].total);
 
   return (
-    <div style={{maxWidth:480,margin:'0 auto',padding:16,background:'#F7FAFC',
-                 minHeight:'calc(100vh - 70px)',fontFamily:'Segoe UI,Arial,sans-serif'}}>
-      <button onClick={onBack} style={{border:'none',background:'#EDF2F7',borderRadius:10,cursor:'pointer',
-        padding:'8px 16px',fontWeight:700,color:'#4A5568',marginBottom:16,touchAction:'manipulation'}}>‹ Volver</button>
+    <div className="max-w-[480px] mx-auto p-4 bg-paper min-h-[calc(100vh-70px)]">
+      <button onClick={onBack} className="border-none bg-border-soft rounded-lg cursor-pointer px-4 py-2 font-bold text-muted mb-4 touch-manipulation">‹ Volver</button>
 
-      <div style={{background:`linear-gradient(135deg,${config.color},${config.color}CC)`,borderRadius:16,
-                   padding:'18px 20px',marginBottom:18,color:'#fff',boxShadow:`0 4px 16px ${config.color}55`}}>
-        <div style={{fontSize:20,fontWeight:800}}>{config.icon} {config.nombre}</div>
-        <div style={{fontSize:32,fontWeight:900,marginTop:10,letterSpacing:-1}}>{$$(totalGeneral)}</div>
-        <div style={{fontSize:11,opacity:.8,marginTop:4}}>{consumos.length} consumos · {cuotasItems.length} en cuotas · {financierosItems.length} otros</div>
+      <div className="rounded-2xl px-5 py-4.5 mb-4.5 text-white shadow-md" style={{background:config.color}}>
+        <div className="text-xl font-extrabold">{config.icon} {config.nombre}</div>
+        <div className="text-[32px] font-extrabold mt-2.5 tracking-tight tabular-nums">{$$(totalGeneral)}</div>
+        <div className="text-[11px] opacity-80 mt-1">{consumos.length} consumos · {cuotasItems.length} en cuotas · {financierosItems.length} otros</div>
       </div>
 
-      <div style={{background:'#fff',borderRadius:14,padding:'14px 16px',marginBottom:14,boxShadow:'0 1px 4px rgba(0,0,0,0.08)'}}>
-        <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0'}}>
-          <span style={{fontSize:13,color:'#718096'}}>Consumos categorizables</span>
-          <span style={{fontSize:14,fontWeight:700,color:'#2D3748'}}>{$$(totalConsumos)}</span>
+      <div className="bg-white rounded-2xl px-4 py-3.5 mb-3.5 shadow-sm">
+        <div className="flex justify-between py-1.5">
+          <span className="text-[13px] text-muted">Consumos categorizables</span>
+          <span className="text-sm font-bold text-ink tabular-nums">{$$(totalConsumos)}</span>
         </div>
         {totalCuotas > 0 && (
-          <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderTop:'1px solid #F0F4F8'}}>
-            <span style={{fontSize:13,color:'#718096'}}>Cuotas</span>
-            <span style={{fontSize:14,fontWeight:700,color:'#553C9A'}}>{$$(totalCuotas)}</span>
+          <div className="flex justify-between py-1.5 border-t border-border-soft">
+            <span className="text-[13px] text-muted">Cuotas</span>
+            <span className="text-sm font-bold text-tab-cierre tabular-nums">{$$(totalCuotas)}</span>
           </div>
         )}
         {totalFinancieros > 0 && (
-          <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderTop:'1px solid #F0F4F8'}}>
-            <span style={{fontSize:13,color:'#718096'}}>Pagos / impuestos / intereses</span>
-            <span style={{fontSize:14,fontWeight:700,color:'#C53030'}}>{$$(totalFinancieros)}</span>
+          <div className="flex justify-between py-1.5 border-t border-border-soft">
+            <span className="text-[13px] text-muted">Pagos / impuestos / intereses</span>
+            <span className="text-sm font-bold text-negative tabular-nums">{$$(totalFinancieros)}</span>
           </div>
         )}
       </div>
 
-
       {cuotasItems.length > 0 && (
-        <div style={{background:'#fff',borderRadius:14,overflow:'hidden',marginBottom:14,boxShadow:'0 1px 4px rgba(0,0,0,0.08)'}}>
-          <div style={{background:'#553C9A',color:'#fff',padding:'10px 16px',fontWeight:700,fontSize:13,display:'flex',justifyContent:'space-between'}}>
-            <span>🧾 Cuotas</span><span style={{fontSize:11,opacity:.8}}>{$$(totalCuotas)}</span>
+        <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
+          <div className="bg-tab-cierre text-white px-4 py-2.5 font-bold text-[13px] flex justify-between">
+            <span>🧾 Cuotas</span><span className="text-[11px] opacity-80">{$$(totalCuotas)}</span>
           </div>
           {cuotasItems.map((m,i) => (
-            <div key={m.id||i} style={{display:'flex',alignItems:'center',padding:'9px 14px',
-                                  borderBottom:i<cuotasItems.length-1?'1px solid #F7FAFC':'none',background:i%2===0?'#fff':'#FAFAFA'}}>
-              <div style={{flex:1}}>
-                <div style={{fontSize:12,color:'#2D3748'}}>{m.comercio} <span style={{fontSize:10,background:'#EDE9FE',color:'#553C9A',borderRadius:4,padding:'1px 5px',fontWeight:700}}>{m.cuotas}</span></div>
-                <div style={{fontSize:11,color:'#A0AEC0'}}>{m.fecha.split('-').reverse().join('/')}{m.moneda==='USD'&&<span style={{color:'#2B6CB0',marginLeft:6}}>USD {m.importe.toFixed(2)}</span>}</div>
+            <div key={m.id||i} className={`flex items-center px-3.5 py-2.5 ${i<cuotasItems.length-1?'border-b border-border-soft':''} ${i%2===0?'bg-white':'bg-[#FAFAFA]'}`}>
+              <div className="flex-1">
+                <div className="text-xs text-ink">{m.comercio} <span className="text-[10px] bg-accent-soft text-accent-strong rounded px-1.5 py-0.5 font-bold">{m.cuotas}</span></div>
+                <div className="text-[11px] text-muted-light">{m.fecha.split('-').reverse().join('/')}{m.moneda==='USD'&&<span className="text-tab-tarjetas ml-1.5">USD {m.importe.toFixed(2)}</span>}</div>
               </div>
-              <span style={{fontWeight:700,fontSize:13,color:'#553C9A'}}>{$$(montoEnPesos(m))}</span>
+              <span className="font-bold text-[13px] text-tab-cierre tabular-nums">{$$(montoEnPesos(m))}</span>
             </div>
           ))}
         </div>
       )}
 
       {sortedGrupos.length > 0 && (
-        <div style={{background:'#fff',borderRadius:14,overflow:'hidden',marginBottom:14,boxShadow:'0 1px 4px rgba(0,0,0,0.08)'}}>
-          <div style={{background:config.color,color:'#fff',padding:'10px 16px',fontWeight:700,fontSize:13}}>Consumos por categoría</div>
+        <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
+          <div className="text-white px-4 py-2.5 font-bold text-[13px]" style={{background:config.color}}>Consumos por categoría</div>
           {sortedGrupos.map(([cat,data]) => (
             <div key={cat}>
               <div onClick={()=>setExpanded(p=>({...p,[cat]:!p[cat]}))}
-                style={{display:'flex',alignItems:'center',padding:'12px 14px',borderBottom:'1px solid #F0F4F8',
-                        cursor:'pointer',background:expanded[cat]?'#FAFAFA':'#fff',touchAction:'manipulation'}}>
-                <span style={{fontSize:20,marginRight:10}}>{data.emoji}</span>
-                <span style={{flex:1,fontSize:13,fontWeight:700,color:'#2D3748'}}>{cat}</span>
-                <span style={{fontSize:11,color:'#A0AEC0',marginRight:10}}>{data.items.length}</span>
-                <span style={{fontWeight:800,fontSize:14,color:config.color,marginRight:8}}>{$$(data.total)}</span>
-                <span style={{color:'#A0AEC0',fontSize:12}}>{expanded[cat]?'▲':'▼'}</span>
+                className={`flex items-center px-3.5 py-3 border-b border-border-soft cursor-pointer touch-manipulation ${expanded[cat]?'bg-[#FAFAFA]':'bg-white'}`}>
+                <span className="text-xl mr-2.5">{data.emoji}</span>
+                <span className="flex-1 text-[13px] font-bold text-ink">{cat}</span>
+                <span className="text-[11px] text-muted-light mr-2.5">{data.items.length}</span>
+                <span className="font-extrabold text-sm mr-2 tabular-nums" style={{color:config.color}}>{$$(data.total)}</span>
+                <span className="text-muted-light text-xs">{expanded[cat]?'▲':'▼'}</span>
               </div>
               {expanded[cat] && data.items.map((m,i) => (
-                <div key={m.id||i} style={{display:'flex',alignItems:'center',padding:'9px 14px 9px 44px',
-                                      borderBottom:'1px solid #F7FAFC',background:'#FAFAFA'}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:12,color:'#2D3748'}}>{m.comercio}</div>
-                    <div style={{fontSize:11,color:'#A0AEC0',display:'flex',gap:8,alignItems:'center'}}>
+                <div key={m.id||i} className="flex items-center pl-11 pr-3.5 py-2.5 border-b border-border-soft bg-[#FAFAFA]">
+                  <div className="flex-1">
+                    <div className="text-xs text-ink">{m.comercio}</div>
+                    <div className="text-[11px] text-muted-light flex gap-2 items-center">
                       <span>{m.fecha.split('-').reverse().join('/')}</span>
-                      {m.moneda==='USD'&&<span style={{color:'#2B6CB0'}}>USD {m.importe.toFixed(2)}</span>}
+                      {m.moneda==='USD'&&<span className="text-tab-tarjetas">USD {m.importe.toFixed(2)}</span>}
                       <button onClick={()=>setCategoria(m.comercio)}
-                        style={{border:'none',background:'#EDF2F7',borderRadius:6,cursor:'pointer',fontSize:10,color:'#718096',padding:'2px 6px',touchAction:'manipulation'}}>✏️</button>
+                        className="border-none bg-border-soft rounded-md cursor-pointer text-[10px] text-muted px-1.5 py-0.5 touch-manipulation">✏️</button>
                     </div>
                   </div>
-                  <span style={{fontWeight:700,fontSize:13,color:config.color}}>{$$(montoEnPesos(m))}</span>
+                  <span className="font-bold text-[13px] tabular-nums" style={{color:config.color}}>{$$(montoEnPesos(m))}</span>
                 </div>
               ))}
             </div>
@@ -126,16 +113,15 @@ function DetalleTarjeta({ movimientos, config, dolarTarjeta, categorias, setCate
       )}
 
       {financierosItems.length > 0 && (
-        <div style={{background:'#fff',borderRadius:14,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,0.08)'}}>
-          <div style={{background:'#744210',color:'#fff',padding:'10px 16px',fontWeight:700,fontSize:13}}>💰 Pagos / Impuestos / Intereses</div>
+        <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
+          <div className="bg-tab-gastos text-white px-4 py-2.5 font-bold text-[13px]">💰 Pagos / Impuestos / Intereses</div>
           {financierosItems.map((m,i) => (
-            <div key={m.id||i} style={{display:'flex',alignItems:'center',padding:'9px 14px',
-                                  borderBottom:i<financierosItems.length-1?'1px solid #F7FAFC':'none',background:i%2===0?'#fff':'#FAFAFA'}}>
-              <div style={{flex:1}}>
-                <div style={{fontSize:12,color:'#2D3748'}}>{m.comercio}</div>
-                <div style={{fontSize:11,color:'#A0AEC0'}}>{m.fecha.split('-').reverse().join('/')} · {m.tipoMovimiento}</div>
+            <div key={m.id||i} className={`flex items-center px-3.5 py-2.5 ${i<financierosItems.length-1?'border-b border-border-soft':''} ${i%2===0?'bg-white':'bg-[#FAFAFA]'}`}>
+              <div className="flex-1">
+                <div className="text-xs text-ink">{m.comercio}</div>
+                <div className="text-[11px] text-muted-light">{m.fecha.split('-').reverse().join('/')} · {m.tipoMovimiento}</div>
               </div>
-              <span style={{fontWeight:700,fontSize:13,color:'#744210'}}>{$$(montoEnPesos(m))}</span>
+              <span className="font-bold text-[13px] text-tab-gastos tabular-nums">{$$(montoEnPesos(m))}</span>
             </div>
           ))}
         </div>
@@ -144,13 +130,11 @@ function DetalleTarjeta({ movimientos, config, dolarTarjeta, categorias, setCate
   );
 }
 
-// ── Modal para elegir categoría — grilla de predefinidas + crear nueva ──
 function CatPickerModal({ comercio, categorias, onSave, onClose }) {
   const [showNew,     setShowNew]     = useState(false);
   const [customName,  setCustomName]  = useState('');
   const [customEmoji, setCustomEmoji] = useState('📦');
 
-  // Predefinidas + las personalizadas que ya existen en las categorías guardadas
   const predefNames = new Set(TODAS_CATEGORIAS.map(c => c.categoria));
   const customCats = [...new Set(Object.values(categorias || {}).map(c => c.categoria))]
     .filter(c => !predefNames.has(c))
@@ -160,60 +144,54 @@ function CatPickerModal({ comercio, categorias, onSave, onClose }) {
   const handleNewSave = () => { if (!customName.trim()) return; onSave({ categoria: customName.trim(), emoji: customEmoji }); };
 
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:300,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
-      <div style={{background:'white',borderRadius:'20px 20px 0 0',padding:'20px 16px 32px',width:'100%',maxWidth:500,maxHeight:'80vh',overflowY:'auto'}}>
-        <div style={{fontWeight:800,fontSize:16,marginBottom:4,color:'#1A365D'}}>Cambiar categoría</div>
-        <div style={{fontSize:13,color:'#718096',marginBottom:16}}>"{comercio}"</div>
+    <div className="fixed inset-0 bg-black/60 z-[300] flex items-end justify-center">
+      <div className="bg-white rounded-t-[20px] px-4 pt-5 pb-8 w-full max-w-[500px] max-h-[80vh] overflow-y-auto">
+        <div className="font-extrabold text-base mb-1 text-ink">Cambiar categoría</div>
+        <div className="text-[13px] text-muted mb-4">"{comercio}"</div>
 
         {!showNew ? (
           <>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
+            <div className="grid grid-cols-2 gap-2 mb-3">
               {allCats.map(c=>(
                 <button key={c.categoria} onClick={()=>onSave(c)}
-                  style={{padding:'10px 12px',border:'1.5px solid #E2E8F0',borderRadius:10,cursor:'pointer',
-                          background:'#FAFAFA',textAlign:'left',fontSize:13,fontWeight:600,color:'#2D3748',
-                          display:'flex',alignItems:'center',gap:8,touchAction:'manipulation'}}>
-                  <span style={{fontSize:20}}>{c.emoji}</span>{c.categoria}
+                  className="px-3 py-2.5 border-[1.5px] border-border rounded-lg cursor-pointer bg-[#FAFAFA] text-left text-[13px] font-semibold text-ink flex items-center gap-2 touch-manipulation">
+                  <span className="text-xl">{c.emoji}</span>{c.categoria}
                 </button>
               ))}
             </div>
             <button onClick={()=>setShowNew(true)}
-              style={{width:'100%',padding:'11px',border:'2px dashed #CBD5E0',borderRadius:10,background:'none',
-                      cursor:'pointer',fontSize:13,fontWeight:700,color:'#718096',marginBottom:8,touchAction:'manipulation'}}>
+              className="w-full py-2.5 border-2 border-dashed border-border rounded-lg bg-none cursor-pointer text-[13px] font-bold text-muted mb-2 touch-manipulation">
               ➕ Nueva categoría
             </button>
           </>
         ) : (
-          <div style={{marginBottom:12}}>
-            <div style={{fontSize:12,fontWeight:700,color:'#4A5568',marginBottom:8}}>Nueva categoría</div>
-            <div style={{display:'flex',gap:8,marginBottom:10}}>
+          <div className="mb-3">
+            <div className="text-xs font-bold text-muted mb-2">Nueva categoría</div>
+            <div className="flex gap-2 mb-2.5">
               <input value={customEmoji} onChange={e=>setCustomEmoji(e.target.value)}
-                style={{width:50,padding:'8px',borderRadius:8,border:'1.5px solid #CBD5E0',fontSize:20,textAlign:'center',outline:'none'}}/>
+                className="w-[50px] p-2 rounded-lg border-[1.5px] border-border text-xl text-center outline-none"/>
               <input value={customName} onChange={e=>setCustomName(e.target.value)} placeholder="Nombre de categoría"
-                style={{flex:1,padding:'8px 12px',borderRadius:8,border:'1.5px solid #CBD5E0',fontSize:14,outline:'none'}}/>
+                className="flex-1 px-3 py-2 rounded-lg border-[1.5px] border-border text-sm outline-none"/>
             </div>
-            <div style={{display:'flex',gap:8}}>
+            <div className="flex gap-2">
               <button onClick={()=>setShowNew(false)}
-                style={{flex:1,padding:10,border:'1.5px solid #CBD5E0',borderRadius:9,background:'#fff',cursor:'pointer',fontWeight:600,color:'#718096',touchAction:'manipulation'}}>Volver</button>
+                className="flex-1 py-2.5 border-[1.5px] border-border rounded-lg bg-white cursor-pointer font-semibold text-muted touch-manipulation">Volver</button>
               <button onClick={handleNewSave} disabled={!customName.trim()}
-                style={{flex:2,padding:10,border:'none',borderRadius:9,background:customName.trim()?'#553C9A':'#E2E8F0',
-                        cursor:'pointer',fontWeight:700,color:'white',touchAction:'manipulation'}}>Crear y asignar</button>
+                className={`flex-[2] py-2.5 border-none rounded-lg cursor-pointer font-bold text-white touch-manipulation ${customName.trim()?'bg-tab-cierre':'bg-border'}`}>Crear y asignar</button>
             </div>
           </div>
         )}
 
         <button onClick={onClose}
-          style={{width:'100%',padding:12,border:'1.5px solid #CBD5E0',borderRadius:10,background:'white',
-                  cursor:'pointer',fontWeight:600,color:'#718096',fontSize:14,touchAction:'manipulation'}}>Cancelar</button>
+          className="w-full p-3 border-[1.5px] border-border rounded-lg bg-white cursor-pointer font-semibold text-muted text-sm touch-manipulation">Cancelar</button>
       </div>
     </div>
   );
 }
 
-// ── Vista lista ─────────────────────────────────────────────────────────
 export default function Tarjetas({ appData, saveData, movimientos, loading, onRefresh }) {
   const today = new Date();
-  const [tab,        setTab]        = useState('mes'); // 'mes' | 'historial'
+  const [tab,        setTab]        = useState('mes');
   const [selKey,     setSelKey]     = useState(getKey(today));
   const [selTarjeta, setSelTarjeta] = useState(null);
   const [catEditando, setCatEditando] = useState(null);
@@ -237,8 +215,6 @@ export default function Tarjetas({ appData, saveData, movimientos, loading, onRe
     setCatEditando(null);
   };
 
-  // Repara íconos: para cada categoría guardada, si su nombre coincide con una
-  // categoría conocida (predefinida), reemplaza el emoji por el correcto.
   const [reparando, setReparando] = useState(false);
   const repararIconos = async () => {
     setReparando(true);
@@ -264,77 +240,67 @@ export default function Tarjetas({ appData, saveData, movimientos, loading, onRe
   }
 
   return (
-    <div style={{maxWidth:480,margin:'0 auto',padding:16,background:'#F7FAFC',
-                 minHeight:'calc(100vh - 70px)',fontFamily:'Segoe UI,Arial,sans-serif'}}>
-
-      <div style={{background:'linear-gradient(135deg,#2B6CB0,#1A365D)',borderRadius:16,
-                   padding:'18px 20px',marginBottom:18,color:'#fff',boxShadow:'0 4px 16px rgba(27,54,93,0.3)',
-                   display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+    <div className="max-w-[480px] mx-auto p-4 bg-paper min-h-[calc(100vh-70px)]">
+      <div className="rounded-2xl px-5 py-4.5 mb-4.5 text-white shadow-md flex justify-between items-center bg-tab-tarjetas">
         <div>
-          <div style={{fontSize:21,fontWeight:800}}>💳 Tarjetas</div>
-          <div style={{fontSize:12,opacity:.75,marginTop:3}}>Cargado por Zapia</div>
+          <div className="text-xl font-extrabold">💳 Tarjetas</div>
+          <div className="text-xs opacity-75 mt-0.5">Cargado por Zapia</div>
         </div>
-        <div style={{display:'flex',gap:8}}>
+        <div className="flex gap-2">
           <button onClick={repararIconos} disabled={reparando}
-            style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',borderRadius:9,color:'white',
-                    padding:'7px 12px',cursor:'pointer',fontSize:12,fontWeight:700,touchAction:'manipulation'}}>
+            className="bg-white/15 border border-white/30 rounded-lg text-white px-3 py-1.5 cursor-pointer text-xs font-bold touch-manipulation">
             {reparando ? '...' : '🔧'}
           </button>
           <button onClick={onRefresh} disabled={loading}
-            style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',borderRadius:9,color:'white',
-                    padding:'7px 12px',cursor:'pointer',fontSize:12,fontWeight:700,touchAction:'manipulation'}}>
+            className="bg-white/15 border border-white/30 rounded-lg text-white px-3 py-1.5 cursor-pointer text-xs font-bold touch-manipulation">
             {loading ? '...' : '↻'}
           </button>
         </div>
       </div>
 
-      {/* Tabs Mes / Historial */}
-      <div style={{display:'flex',background:'#E2E8F0',borderRadius:12,padding:4,marginBottom:14,gap:3}}>
+      <div className="flex bg-border-soft rounded-xl p-1 mb-3.5 gap-0.5">
         {[['mes','📅 Mes'],['historial','📊 Historial']].map(([k,label])=>(
-          <button key={k} onClick={()=>setTab(k)} style={{flex:1,padding:'9px 0',border:'none',borderRadius:9,
-            cursor:'pointer',fontWeight:700,fontSize:12,touchAction:'manipulation',
-            background:tab===k?'#fff':'transparent',color:tab===k?'#2B6CB0':'#718096',
-            boxShadow:tab===k?'0 1px 4px rgba(0,0,0,0.1)':'none'}}>{label}</button>
+          <button key={k} onClick={()=>setTab(k)}
+            className={`flex-1 py-2.5 border-none rounded-lg cursor-pointer font-bold text-xs touch-manipulation
+              ${tab===k ? 'bg-white text-tab-tarjetas shadow-sm' : 'bg-transparent text-muted'}`}>{label}</button>
         ))}
       </div>
 
       {tab==='mes' && <>
       <select value={selKey} onChange={e=>setSelKey(e.target.value)}
-        style={{width:'100%',padding:'10px 14px',borderRadius:10,border:'1.5px solid #CBD5E0',
-                fontSize:14,marginBottom:14,background:'#fff',color:'#2D3748',fontWeight:600,cursor:'pointer'}}>
+        className="w-full px-3.5 py-2.5 rounded-lg border-[1.5px] border-border text-sm mb-3.5 bg-white text-ink font-semibold cursor-pointer">
         {monthOpts(today).map(k=><option key={k} value={k}>{fmtKey(k)}</option>)}
       </select>
 
-      {/* Dólar tarjeta */}
       {hayUSD && (
-        <div style={{background:'#EBF8FF',borderRadius:12,padding:'12px 16px',marginBottom:14,border:'1.5px solid #90CDF4'}}>
-          <div style={{fontSize:12,fontWeight:700,color:'#2B6CB0',marginBottom:8}}>💵 Dólar tarjeta de este mes</div>
+        <div className="bg-[#EBF8FF] rounded-xl px-4 py-3 mb-3.5 border-[1.5px] border-[#90CDF4]">
+          <div className="text-xs font-bold text-tab-tarjetas mb-2">💵 Dólar tarjeta de este mes</div>
           {dolarTarjeta > 0 && !dolarInput ? (
-            <div style={{fontSize:14,fontWeight:700,color:'#2D3748'}}>
+            <div className="text-sm font-bold text-ink">
               ${dolarTarjeta.toLocaleString('es-AR')}
               <button onClick={()=>setDolarInput(String(dolarTarjeta))}
-                style={{marginLeft:10,border:'none',background:'#fff',borderRadius:6,cursor:'pointer',fontSize:11,color:'#2B6CB0',padding:'2px 8px',touchAction:'manipulation'}}>editar</button>
+                className="ml-2.5 border-none bg-white rounded-md cursor-pointer text-[11px] text-tab-tarjetas px-2 py-0.5 touch-manipulation">editar</button>
             </div>
           ) : (
-            <div style={{display:'flex',gap:8}}>
-              <div style={{flex:1,display:'flex',alignItems:'center',background:'#fff',borderRadius:8,border:'1.5px solid #90CDF4',padding:'6px 12px',gap:4}}>
-                <span style={{color:'#A0AEC0'}}>$</span>
+            <div className="flex gap-2">
+              <div className="flex-1 flex items-center bg-white rounded-lg border-[1.5px] border-[#90CDF4] px-3 py-1.5 gap-1">
+                <span className="text-muted-light">$</span>
                 <input type="number" inputMode="decimal" value={dolarInput} onChange={e=>setDolarInput(e.target.value)} placeholder="1969.50"
-                  style={{flex:1,border:'none',outline:'none',fontSize:16,fontWeight:700,color:'#1A365D',background:'transparent'}}/>
+                  className="flex-1 border-none outline-none text-base font-bold text-ink bg-transparent tabular-nums"/>
               </div>
-              <button onClick={guardarDolar} style={{padding:'8px 16px',border:'none',borderRadius:8,background:'#2B6CB0',color:'white',fontWeight:700,cursor:'pointer',touchAction:'manipulation'}}>OK</button>
+              <button onClick={guardarDolar} className="px-4 py-2 border-none rounded-lg bg-tab-tarjetas text-white font-bold cursor-pointer touch-manipulation">OK</button>
             </div>
           )}
         </div>
       )}
 
-      {loading && <div style={{textAlign:'center',padding:'40px',color:'#A0AEC0'}}>Cargando...</div>}
+      {loading && <div className="text-center p-10 text-muted-light">Cargando...</div>}
 
       {!loading && movimientosMes.length === 0 && (
-        <div style={{textAlign:'center',padding:'50px 20px',color:'#A0AEC0'}}>
-          <div style={{fontSize:56,marginBottom:16}}>📎</div>
-          <div style={{fontSize:16,fontWeight:700,color:'#4A5568',marginBottom:8}}>Sin resúmenes este mes</div>
-          <div style={{fontSize:13,lineHeight:1.6,maxWidth:280,margin:'0 auto'}}>
+        <div className="text-center px-5 py-12.5 text-muted-light">
+          <div className="text-6xl mb-4">📎</div>
+          <div className="text-base font-bold text-muted mb-2">Sin resúmenes este mes</div>
+          <div className="text-[13px] leading-relaxed max-w-[280px] mx-auto">
             Pasale los PDFs a Zapia con la instrucción de cargar en la hoja "Tarjetas" — acá se reflejan solos.
           </div>
         </div>
@@ -353,16 +319,15 @@ export default function Tarjetas({ appData, saveData, movimientos, loading, onRe
 
         return (
           <div key={key} onClick={()=>setSelTarjeta(key)}
-            style={{background:'#fff',borderRadius:14,overflow:'hidden',marginBottom:12,cursor:'pointer',
-                    boxShadow:'0 1px 6px rgba(0,0,0,0.1)',touchAction:'manipulation'}}>
-            <div style={{background:config.color,color:'#fff',padding:'12px 16px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <span style={{fontWeight:700,fontSize:14}}>{config.icon} {config.nombre}</span>
-              <span style={{fontSize:12,opacity:.8}}>›</span>
+            className="bg-white rounded-2xl overflow-hidden mb-3 cursor-pointer shadow-sm touch-manipulation">
+            <div className="text-white px-4 py-3 flex justify-between items-center" style={{background:config.color}}>
+              <span className="font-bold text-sm">{config.icon} {config.nombre}</span>
+              <span className="text-xs opacity-80">›</span>
             </div>
-            <div style={{padding:'14px 16px'}}>
-              <div style={{fontSize:10,color:'#A0AEC0',textTransform:'uppercase',fontWeight:700,letterSpacing:.5}}>Total del mes</div>
-              <div style={{fontSize:26,fontWeight:900,color:'#1A365D',letterSpacing:-1,marginBottom:10}}>{$$(total)}</div>
-              <div style={{display:'flex',gap:10,fontSize:11,color:'#718096',flexWrap:'wrap'}}>
+            <div className="px-4 py-3.5">
+              <div className="text-[10px] text-muted-light uppercase font-bold tracking-wide">Total del mes</div>
+              <div className="text-[26px] font-extrabold text-ink tracking-tight mb-2.5 tabular-nums">{$$(total)}</div>
+              <div className="flex gap-2.5 text-[11px] text-muted flex-wrap">
                 <span>🛍️ Consumos {$$(totalConsumos)}</span>
                 {cuotasItems.length>0 && <span>🧾 Cuotas {$$(totalCuotas)}</span>}
                 {financierosItems.length>0 && <span>💰 Otros {financierosItems.length}</span>}
@@ -380,16 +345,15 @@ export default function Tarjetas({ appData, saveData, movimientos, loading, onRe
   );
 }
 
-// ── Historial mes a mes ────────────────────────────────────────────────
 function TarjetasHistorial({ movimientos, dolarTarjetaMap }) {
   const mesesConDatos = [...new Set((movimientos||[]).map(m => m.mes))].filter(Boolean).sort();
 
   if (mesesConDatos.length === 0) {
     return (
-      <div style={{textAlign:'center',padding:'50px 20px',color:'#A0AEC0'}}>
-        <div style={{fontSize:56,marginBottom:16}}>📊</div>
-        <div style={{fontSize:16,fontWeight:700,color:'#4A5568',marginBottom:8}}>Sin historial todavía</div>
-        <div style={{fontSize:13}}>Cuando tengas resúmenes de más de un mes, acá vas a ver la evolución.</div>
+      <div className="text-center px-5 py-12.5 text-muted-light">
+        <div className="text-6xl mb-4">📊</div>
+        <div className="text-base font-bold text-muted mb-2">Sin historial todavía</div>
+        <div className="text-[13px]">Cuando tengas resúmenes de más de un mes, acá vas a ver la evolución.</div>
       </div>
     );
   }
@@ -414,37 +378,36 @@ function TarjetasHistorial({ movimientos, dolarTarjetaMap }) {
 
   return (
     <>
-      <div style={{background:'#fff',borderRadius:14,padding:'16px 12px',marginBottom:14,boxShadow:'0 1px 4px rgba(0,0,0,0.08)'}}>
-        <div style={{fontWeight:700,color:'#2D3748',marginBottom:12,fontSize:13,paddingLeft:4}}>ICBC vs Banco Nación — últimos {chartData.length} meses</div>
+      <div className="bg-white rounded-2xl px-3 py-4 mb-3.5 shadow-sm">
+        <div className="font-bold text-ink mb-3 text-[13px] pl-1">ICBC vs Banco Nación — últimos {chartData.length} meses</div>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={chartData} barGap={3} barCategoryGap="30%">
             <CartesianGrid strokeDasharray="3 3" stroke="#F0F4F8" vertical={false}/>
-            <XAxis dataKey="mes" tick={{fontSize:11,fill:'#718096'}} axisLine={false} tickLine={false}/>
-            <YAxis tickFormatter={v=>`$${Math.round(v/1000)}K`} tick={{fontSize:10,fill:'#718096'}} width={52} axisLine={false} tickLine={false}/>
-            <Tooltip formatter={v=>$$(v)} contentStyle={{borderRadius:8,border:'1px solid #E2E8F0',fontSize:12}}/>
+            <XAxis dataKey="mes" tick={{fontSize:11,fill:'#6B6459'}} axisLine={false} tickLine={false}/>
+            <YAxis tickFormatter={v=>`$${Math.round(v/1000)}K`} tick={{fontSize:10,fill:'#6B6459'}} width={52} axisLine={false} tickLine={false}/>
+            <Tooltip formatter={v=>$$(v)} contentStyle={{borderRadius:8,border:'1px solid #E2DDD3',fontSize:12}}/>
             <Legend wrapperStyle={{fontSize:12}}/>
-            <Bar dataKey="ICBC" fill="#553C9A" radius={[4,4,0,0]}/>
+            <Bar dataKey="ICBC" fill="#6B21A8" radius={[4,4,0,0]}/>
             <Bar dataKey="BNA"  fill="#2B6CB0" radius={[4,4,0,0]}/>
           </BarChart>
         </ResponsiveContainer>
       </div>
 
-      <div style={{background:'#fff',borderRadius:14,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,0.08)'}}>
-        <div style={{background:'#1A365D',color:'#fff',padding:'11px 16px',fontWeight:700,fontSize:13}}>Detalle por mes</div>
-        <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-          <thead><tr style={{background:'#EDF2F7'}}>
+      <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
+        <div className="bg-ink text-white px-4 py-2.5 font-bold text-[13px]">Detalle por mes</div>
+        <table className="w-full border-collapse text-xs">
+          <thead><tr className="bg-border-soft">
             {['Mes','ICBC','BNA','Total'].map(h=>(
-              <th key={h} style={{padding:'8px 10px',textAlign:h==='Mes'?'left':'right',color:'#4A5568',
-                fontWeight:700,borderBottom:'1px solid #E2E8F0',fontSize:10,textTransform:'uppercase'}}>{h}</th>
+              <th key={h} className={`px-2.5 py-2 ${h==='Mes'?'text-left':'text-right'} text-muted font-bold border-b border-border text-[10px] uppercase`}>{h}</th>
             ))}
           </tr></thead>
           <tbody>
             {histRows.map(({mes,icbc,bna},i) => (
-              <tr key={mes} style={{background:i%2===0?'#fff':'#F7FAFC'}}>
-                <td style={{padding:'9px 10px',fontWeight:600,color:'#2D3748'}}>{fmtKey(mes)}</td>
-                <td style={{padding:'9px 10px',textAlign:'right',color:'#553C9A'}}>{icbc>0?$$(icbc):'—'}</td>
-                <td style={{padding:'9px 10px',textAlign:'right',color:'#2B6CB0'}}>{bna>0?$$(bna):'—'}</td>
-                <td style={{padding:'9px 10px',textAlign:'right',fontWeight:800,color:'#1A365D'}}>{$$(icbc+bna)}</td>
+              <tr key={mes} className={i%2===0?'bg-white':'bg-paper'}>
+                <td className="px-2.5 py-2.5 font-semibold text-ink">{fmtKey(mes)}</td>
+                <td className="px-2.5 py-2.5 text-right text-tab-cierre tabular-nums">{icbc>0?$$(icbc):'—'}</td>
+                <td className="px-2.5 py-2.5 text-right text-tab-tarjetas tabular-nums">{bna>0?$$(bna):'—'}</td>
+                <td className="px-2.5 py-2.5 text-right font-extrabold text-ink tabular-nums">{$$(icbc+bna)}</td>
               </tr>
             ))}
           </tbody>

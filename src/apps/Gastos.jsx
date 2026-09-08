@@ -7,7 +7,6 @@ function CatModal({ item, items, categorias, onSave, onClose }) {
   const [customEmoji, setCustomEmoji] = useState('📦');
   const [showNew,     setShowNew]     = useState(false);
 
-  // Soporta un solo item (edición normal) o varios (edición masiva)
   const targetItems = items || [item];
 
   const predefNames = new Set(TODAS_CATEGORIAS.map(c => c.categoria));
@@ -20,56 +19,48 @@ function CatModal({ item, items, categorias, onSave, onClose }) {
   const handleNewSave = () => { if (!customName.trim()) return; handleSave({ categoria: customName.trim(), emoji: customEmoji }); };
 
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:300,
-                 display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
-      <div style={{background:'white',borderRadius:'20px 20px 0 0',padding:'20px 16px 32px',
-                   width:'100%',maxWidth:500,maxHeight:'80vh',overflowY:'auto'}}>
-        <div style={{fontWeight:800,fontSize:16,marginBottom:4,color:'#1A365D'}}>Cambiar categoría</div>
+    <div className="fixed inset-0 bg-black/60 z-[300] flex items-end justify-center">
+      <div className="bg-white rounded-t-[20px] px-4 pt-5 pb-8 w-full max-w-[500px] max-h-[80vh] overflow-y-auto">
+        <div className="font-extrabold text-base mb-1 text-ink">Cambiar categoría</div>
         {items ? (
-          <div style={{fontSize:13,color:'#718096',marginBottom:16}}>{targetItems.length} gastos seleccionados</div>
+          <div className="text-[13px] text-muted mb-4">{targetItems.length} gastos seleccionados</div>
         ) : (
-          <div style={{fontSize:13,color:'#718096',marginBottom:16}}>"{item.key}"</div>
+          <div className="text-[13px] text-muted mb-4">"{item.key}"</div>
         )}
 
         {!showNew ? (
           <>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
+            <div className="grid grid-cols-2 gap-2 mb-3">
               {allCats.map(c=>(
                 <button key={c.categoria} onClick={()=>handleSave(c)}
-                  style={{padding:'10px 12px',border:'1.5px solid #E2E8F0',borderRadius:10,cursor:'pointer',
-                          background:'#FAFAFA',textAlign:'left',fontSize:13,fontWeight:600,color:'#2D3748',
-                          display:'flex',alignItems:'center',gap:8,touchAction:'manipulation'}}>
-                  <span style={{fontSize:20}}>{c.emoji}</span>{c.categoria}
+                  className="px-3 py-2.5 border-[1.5px] border-border rounded-lg cursor-pointer bg-[#FAFAFA] text-left text-[13px] font-semibold text-ink flex items-center gap-2 touch-manipulation">
+                  <span className="text-xl">{c.emoji}</span>{c.categoria}
                 </button>
               ))}
             </div>
             <button onClick={()=>setShowNew(true)}
-              style={{width:'100%',padding:'11px',border:'2px dashed #CBD5E0',borderRadius:10,
-                      background:'none',cursor:'pointer',fontSize:13,fontWeight:700,color:'#718096',
-                      marginBottom:8,touchAction:'manipulation'}}>➕ Nueva categoría</button>
+              className="w-full py-2.5 border-2 border-dashed border-border rounded-lg bg-none cursor-pointer text-[13px] font-bold text-muted mb-2 touch-manipulation">➕ Nueva categoría</button>
           </>
         ) : (
-          <div style={{marginBottom:12}}>
-            <div style={{fontSize:12,fontWeight:700,color:'#4A5568',marginBottom:8}}>Nueva categoría</div>
-            <div style={{display:'flex',gap:8,marginBottom:10}}>
+          <div className="mb-3">
+            <div className="text-xs font-bold text-muted mb-2">Nueva categoría</div>
+            <div className="flex gap-2 mb-2.5">
               <input value={customEmoji} onChange={e=>setCustomEmoji(e.target.value)}
-                style={{width:50,padding:'8px',borderRadius:8,border:'1.5px solid #CBD5E0',fontSize:20,textAlign:'center',outline:'none'}}/>
+                className="w-[50px] p-2 rounded-lg border-[1.5px] border-border text-xl text-center outline-none"/>
               <input value={customName} onChange={e=>setCustomName(e.target.value)} placeholder="Nombre de categoría"
-                style={{flex:1,padding:'8px 12px',borderRadius:8,border:'1.5px solid #CBD5E0',fontSize:14,outline:'none'}}/>
+                className="flex-1 px-3 py-2 rounded-lg border-[1.5px] border-border text-sm outline-none"/>
             </div>
-            <div style={{display:'flex',gap:8}}>
+            <div className="flex gap-2">
               <button onClick={()=>setShowNew(false)}
-                style={{flex:1,padding:10,border:'1.5px solid #CBD5E0',borderRadius:9,background:'#fff',cursor:'pointer',fontWeight:600,color:'#718096',touchAction:'manipulation'}}>Volver</button>
+                className="flex-1 py-2.5 border-[1.5px] border-border rounded-lg bg-white cursor-pointer font-semibold text-muted touch-manipulation">Volver</button>
               <button onClick={handleNewSave} disabled={!customName.trim()}
-                style={{flex:2,padding:10,border:'none',borderRadius:9,background:customName.trim()?'#553C9A':'#E2E8F0',
-                        cursor:'pointer',fontWeight:700,color:'white',touchAction:'manipulation'}}>Crear y asignar</button>
+                className={`flex-[2] py-2.5 border-none rounded-lg cursor-pointer font-bold text-white touch-manipulation ${customName.trim()?'bg-tab-cierre':'bg-border'}`}>Crear y asignar</button>
             </div>
           </div>
         )}
 
         <button onClick={onClose}
-          style={{width:'100%',padding:12,border:'1.5px solid #CBD5E0',borderRadius:10,
-                  background:'white',cursor:'pointer',fontWeight:600,color:'#718096',fontSize:14,touchAction:'manipulation'}}>Cancelar</button>
+          className="w-full p-3 border-[1.5px] border-border rounded-lg bg-white cursor-pointer font-semibold text-muted text-sm touch-manipulation">Cancelar</button>
       </div>
     </div>
   );
@@ -98,24 +89,24 @@ function EditCatModal({ categorias, onSave, onClose }) {
   };
 
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:300,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
-      <div style={{background:'white',borderRadius:'20px 20px 0 0',padding:'20px 16px 32px',width:'100%',maxWidth:500,maxHeight:'85vh',overflowY:'auto'}}>
-        <div style={{fontWeight:800,fontSize:16,marginBottom:4,color:'#1A365D'}}>Gestionar categorías</div>
-        <div style={{fontSize:12,color:'#718096',marginBottom:16}}>Editá el nombre o emoji. Aplica a todos los gastos con esa categoría.</div>
+    <div className="fixed inset-0 bg-black/60 z-[300] flex items-end justify-center">
+      <div className="bg-white rounded-t-[20px] px-4 pt-5 pb-8 w-full max-w-[500px] max-h-[85vh] overflow-y-auto">
+        <div className="font-extrabold text-base mb-1 text-ink">Gestionar categorías</div>
+        <div className="text-xs text-muted mb-4">Editá el nombre o emoji. Aplica a todos los gastos con esa categoría.</div>
         {lista.map(cat => (
-          <div key={cat.nombre} style={{background:'#FAFAFA',borderRadius:10,padding:'12px 14px',marginBottom:10,border:'1px solid #E2E8F0'}}>
-            <div style={{fontSize:11,color:'#A0AEC0',marginBottom:6}}>{cat.items.length} gasto{cat.items.length>1?'s':''}</div>
-            <div style={{display:'flex',gap:8}}>
+          <div key={cat.nombre} className="bg-[#FAFAFA] rounded-lg px-3.5 py-3 mb-2.5 border border-border">
+            <div className="text-[11px] text-muted-light mb-1.5">{cat.items.length} gasto{cat.items.length>1?'s':''}</div>
+            <div className="flex gap-2">
               <input value={editEmoji[cat.nombre]??cat.emoji} onChange={e=>setEditEmoji(p=>({...p,[cat.nombre]:e.target.value}))}
-                style={{width:44,padding:'6px',borderRadius:8,border:'1.5px solid #CBD5E0',fontSize:18,textAlign:'center',outline:'none'}}/>
+                className="w-11 p-1.5 rounded-lg border-[1.5px] border-border text-lg text-center outline-none"/>
               <input value={editNombre[cat.nombre]??cat.nombre} onChange={e=>setEditNombre(p=>({...p,[cat.nombre]:e.target.value}))}
-                style={{flex:1,padding:'6px 10px',borderRadius:8,border:'1.5px solid #CBD5E0',fontSize:14,outline:'none'}}/>
+                className="flex-1 px-2.5 py-1.5 rounded-lg border-[1.5px] border-border text-sm outline-none"/>
               <button onClick={()=>guardarRename(cat.nombre)}
-                style={{padding:'6px 14px',border:'none',borderRadius:8,background:'#2B6CB0',color:'white',fontWeight:700,fontSize:12,cursor:'pointer',touchAction:'manipulation'}}>OK</button>
+                className="px-3.5 py-1.5 border-none rounded-lg bg-tab-tarjetas text-white font-bold text-xs cursor-pointer touch-manipulation">OK</button>
             </div>
           </div>
         ))}
-        <button onClick={onClose} style={{width:'100%',padding:12,border:'1.5px solid #CBD5E0',borderRadius:10,background:'white',cursor:'pointer',fontWeight:600,color:'#718096',fontSize:14,marginTop:4,touchAction:'manipulation'}}>Cerrar</button>
+        <button onClick={onClose} className="w-full p-3 border-[1.5px] border-border rounded-lg bg-white cursor-pointer font-semibold text-muted text-sm mt-1 touch-manipulation">Cerrar</button>
       </div>
     </div>
   );
@@ -152,13 +143,10 @@ export default function Gastos({ zapiaData, appData, saveData, loading, movimien
     if (Object.keys(nuevas).length > 0) saveData({ ...appData, categories: { ...categories, ...nuevas } });
   }, [zapiaData]);
 
-  // Ítems de Zapia (WhatsApp), normalizados a la forma unificada
   const zapiaItems = zapiaData
     .filter(r => r.fecha && (filtro === 'semana' ? wStr.includes(r.fecha) : monthOf(r.fecha) === selMes))
     .map(r => ({ key:r.que, monto:r.costo, fecha:r.fecha, quien:r.quien, medio:r.medio, origen:'zapia' }));
 
-  // Ítems de Tarjeta (solo en vista de mes, y solo consumos reales — sin cuotas ni financieros)
-  // Items de Tarjeta (solo en vista de mes, TODOS los movimientos incluyendo cuotas y financieros)
   const tarjetaItems = filtro === 'mes' ? (movimientos || [])
     .filter(m => m.mes === selMes)
     .map(m => {
@@ -224,119 +212,111 @@ export default function Gastos({ zapiaData, appData, saveData, loading, movimien
   const toggleSelectionMode = () => { setSelectionMode(p=>!p); setSelected(new Set()); };
 
   return (
-    <div style={{maxWidth:640,margin:'0 auto',padding:16,background:'#F7FAFC',minHeight:'calc(100vh - 70px)',fontFamily:'Segoe UI,Arial,sans-serif'}}>
+    <div className="max-w-[640px] mx-auto p-4 bg-paper min-h-[calc(100vh-70px)]">
       {editItem     && <CatModal item={editItem} categorias={categories} onSave={recategorizar} onClose={()=>setEditItem(null)}/>}
       {bulkEdit     && <CatModal items={selectedItems} categorias={categories} onSave={recategorizar} onClose={()=>setBulkEdit(false)}/>}
       {showEditCats && <EditCatModal categorias={categories} onSave={guardarCategorias} onClose={()=>setShowEditCats(false)}/>}
 
-      <div style={{background:'linear-gradient(135deg,#744210,#C05621)',borderRadius:16,padding:'18px 20px',marginBottom:18,color:'#fff',
-                   boxShadow:'0 4px 16px rgba(116,66,16,0.3)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+      <div className="rounded-2xl px-5 py-4.5 mb-4.5 text-white shadow-md flex justify-between items-center bg-tab-gastos">
         <div>
-          <div style={{fontSize:21,fontWeight:800}}>🏷️ Gastos del hogar</div>
-          <div style={{fontSize:12,opacity:.75,marginTop:3}}>Zapia · WhatsApp + Tarjetas</div>
+          <div className="text-xl font-extrabold">🏷️ Gastos del hogar</div>
+          <div className="text-xs opacity-75 mt-0.5">Zapia · WhatsApp + Tarjetas</div>
         </div>
-        <div style={{display:'flex',gap:8}}>
+        <div className="flex gap-2">
           <button onClick={handleRefresh} disabled={refreshing}
-            style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',borderRadius:9,color:'white',
-                    padding:'7px 11px',cursor:'pointer',fontSize:12,fontWeight:700,touchAction:'manipulation'}}>
+            className="bg-white/15 border border-white/30 rounded-lg text-white px-2.5 py-1.5 cursor-pointer text-xs font-bold touch-manipulation">
             {refreshing ? '...' : '↻'}
           </button>
           <button onClick={()=>setShowEditCats(true)}
-            style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',borderRadius:9,color:'white',
-                    padding:'7px 11px',cursor:'pointer',fontSize:12,fontWeight:700,touchAction:'manipulation'}}>✏️ Categorías</button>
+            className="bg-white/15 border border-white/30 rounded-lg text-white px-2.5 py-1.5 cursor-pointer text-xs font-bold touch-manipulation">✏️ Categorías</button>
           <button onClick={toggleSelectionMode}
-            style={{background:selectionMode?'#fff':'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',borderRadius:9,
-                    color:selectionMode?'#744210':'white',padding:'7px 11px',cursor:'pointer',fontSize:12,fontWeight:700,touchAction:'manipulation'}}>
+            className={`border border-white/30 rounded-lg px-2.5 py-1.5 cursor-pointer text-xs font-bold touch-manipulation ${selectionMode?'bg-white text-tab-gastos':'bg-white/15 text-white'}`}>
             {selectionMode ? '✕ Salir' : '☑️ Seleccionar'}
           </button>
         </div>
       </div>
 
-      <div style={{marginBottom:14}}>
-        <div style={{display:'flex',background:'#E2E8F0',borderRadius:10,padding:3,gap:2,marginBottom:10}}>
+      <div className="mb-3.5">
+        <div className="flex bg-border-soft rounded-lg p-1 gap-0.5 mb-2.5">
           {[['semana','Esta semana'],['mes','Por mes']].map(([k,label])=>(
-            <button key={k} onClick={()=>setFiltro(k)} style={{flex:1,padding:'8px 0',border:'none',borderRadius:8,
-              cursor:'pointer',fontWeight:700,fontSize:12,touchAction:'manipulation',
-              background:filtro===k?'#fff':'transparent',color:filtro===k?'#744210':'#718096',
-              boxShadow:filtro===k?'0 1px 3px rgba(0,0,0,0.1)':'none'}}>{label}</button>
+            <button key={k} onClick={()=>setFiltro(k)}
+              className={`flex-1 py-2 border-none rounded-lg cursor-pointer font-bold text-xs touch-manipulation
+                ${filtro===k ? 'bg-white text-tab-gastos shadow-sm' : 'bg-transparent text-muted'}`}>{label}</button>
           ))}
         </div>
         {filtro==='semana' ? (
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',background:'#fff',borderRadius:10,padding:'8px 12px',boxShadow:'0 1px 4px rgba(0,0,0,0.07)'}}>
-            <button onClick={prevWeek} style={{border:'none',background:'none',cursor:'pointer',fontSize:22,color:'#744210',padding:'0 8px',touchAction:'manipulation'}}>‹</button>
-            <div style={{textAlign:'center'}}>
-              <div style={{fontWeight:700,color:'#2D3748',fontSize:13}}>{fmtDate(wDates[0])} – {fmtDate(wDates[6])}</div>
-              {isCurrentWeek&&<div style={{fontSize:11,color:'#A0AEC0'}}>Semana actual</div>}
+          <div className="flex items-center justify-between bg-white rounded-lg px-3 py-2 shadow-sm">
+            <button onClick={prevWeek} className="border-none bg-none cursor-pointer text-2xl text-tab-gastos px-2 touch-manipulation">‹</button>
+            <div className="text-center">
+              <div className="font-bold text-ink text-[13px]">{fmtDate(wDates[0])} – {fmtDate(wDates[6])}</div>
+              {isCurrentWeek&&<div className="text-[11px] text-muted-light">Semana actual</div>}
             </div>
-            <button onClick={nextWeek} style={{border:'none',background:'none',cursor:'pointer',fontSize:22,color:'#744210',padding:'0 8px',touchAction:'manipulation'}}>›</button>
+            <button onClick={nextWeek} className="border-none bg-none cursor-pointer text-2xl text-tab-gastos px-2 touch-manipulation">›</button>
           </div>
         ) : (
           <select value={selMes} onChange={e=>setSelMes(e.target.value)}
-            style={{width:'100%',padding:'10px 14px',borderRadius:10,border:'1.5px solid #CBD5E0',fontSize:14,
-                    background:'#fff',color:'#2D3748',fontWeight:600,cursor:'pointer'}}>
+            className="w-full px-3.5 py-2.5 rounded-lg border-[1.5px] border-border text-sm bg-white text-ink font-semibold cursor-pointer">
             {monthOpts(today).map(k=><option key={k} value={k}>{fmtKey(k)}{k===getKey(today)?' — actual':''}</option>)}
           </select>
         )}
       </div>
 
-      {loading&&<div style={{textAlign:'center',padding:'40px',color:'#A0AEC0'}}>Cargando datos...</div>}
+      {loading&&<div className="text-center p-10 text-muted-light">Cargando datos...</div>}
       {!loading&&filtered.length===0&&(
-        <div style={{textAlign:'center',padding:'60px 20px',color:'#A0AEC0'}}>
-          <div style={{fontSize:48,marginBottom:12}}>📋</div>
-          <div style={{fontWeight:600,marginBottom:6}}>Sin gastos {filtro==='semana'?'esta semana':'este mes'}</div>
-          <div style={{fontSize:13}}>Los gastos del grupo de WhatsApp{filtro==='mes'?' y los consumos de tarjeta ':' '}aparecen acá automáticamente.</div>
+        <div className="text-center px-5 py-15 text-muted-light">
+          <div className="text-5xl mb-3">📋</div>
+          <div className="font-semibold mb-1.5">Sin gastos {filtro==='semana'?'esta semana':'este mes'}</div>
+          <div className="text-[13px]">Los gastos del grupo de WhatsApp{filtro==='mes'?' y los consumos de tarjeta ':' '}aparecen acá automáticamente.</div>
         </div>
       )}
 
       {filtered.length>0&&(
-        <div style={{background:'#fff',borderRadius:14,padding:'14px 16px',marginBottom:14,boxShadow:'0 1px 4px rgba(0,0,0,0.08)'}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-            <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:.8,color:'#718096'}}>Total {filtro==='semana'?'semana':'mes'}</div>
-            <div style={{fontSize:26,fontWeight:900,color:'#744210',letterSpacing:-1}}>{$$(totalGen)}</div>
+        <div className="bg-white rounded-2xl px-4 py-3.5 mb-3.5 shadow-sm">
+          <div className="flex justify-between items-center mb-2.5">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-muted">Total {filtro==='semana'?'semana':'mes'}</div>
+            <div className="text-[26px] font-extrabold text-tab-gastos tracking-tight tabular-nums">{$$(totalGen)}</div>
           </div>
           {(totalGerman>0||totalJuli>0||totalTarjeta>0)&&<>
-            <div style={{height:8,background:'#EDF2F7',borderRadius:8,overflow:'hidden',display:'flex',marginBottom:6}}>
-              <div style={{height:'100%',width:`${totalGen>0?totalGerman/totalGen*100:0}%`,background:'#2B6CB0'}}/>
-              <div style={{height:'100%',width:`${totalGen>0?totalJuli/totalGen*100:0}%`,background:'#D53F8C'}}/>
-              <div style={{height:'100%',width:`${totalGen>0?totalTarjeta/totalGen*100:0}%`,background:'#553C9A'}}/>
+            <div className="h-2 bg-border-soft rounded-lg overflow-hidden flex mb-1.5">
+              <div className="h-full bg-tab-tarjetas" style={{width:`${totalGen>0?totalGerman/totalGen*100:0}%`}}/>
+              <div className="h-full bg-julieta" style={{width:`${totalGen>0?totalJuli/totalGen*100:0}%`}}/>
+              <div className="h-full bg-tab-cierre" style={{width:`${totalGen>0?totalTarjeta/totalGen*100:0}%`}}/>
             </div>
-            <div style={{display:'flex',justifyContent:'space-between',fontSize:12,flexWrap:'wrap',gap:6}}>
-              {totalGerman>0&&<span style={{color:'#2B6CB0',fontWeight:600}}>👨 Germán {$$(totalGerman)}</span>}
-              {totalJuli>0&&<span style={{color:'#D53F8C',fontWeight:600}}>👩 Julieta {$$(totalJuli)}</span>}
-              {totalTarjeta>0&&<span style={{color:'#553C9A',fontWeight:600}}>💳 Tarjeta {$$(totalTarjeta)}</span>}
+            <div className="flex justify-between text-xs flex-wrap gap-1.5">
+              {totalGerman>0&&<span className="text-tab-tarjetas font-semibold">👨 Germán {$$(totalGerman)}</span>}
+              {totalJuli>0&&<span className="text-julieta font-semibold">👩 Julieta {$$(totalJuli)}</span>}
+              {totalTarjeta>0&&<span className="text-tab-cierre font-semibold">💳 Tarjeta {$$(totalTarjeta)}</span>}
             </div>
           </>}
         </div>
       )}
 
       {sortedGrupos.length>0&&(
-        <div style={{background:'#fff',borderRadius:14,overflow:'hidden',marginBottom:14,boxShadow:'0 1px 4px rgba(0,0,0,0.08)'}}>
-          <div style={{background:'#744210',color:'#fff',padding:'10px 16px',fontWeight:700,fontSize:13,display:'flex',justifyContent:'space-between'}}>
-            <span>Por categoría</span><span style={{fontSize:11,opacity:.8}}>{sortedGrupos.length} categorías</span>
+        <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
+          <div className="bg-tab-gastos text-white px-4 py-2.5 font-bold text-[13px] flex justify-between">
+            <span>Por categoría</span><span className="text-[11px] opacity-80">{sortedGrupos.length} categorías</span>
           </div>
           {sortedGrupos.map(([cat,data])=>(
             <div key={cat}>
               <div onClick={()=>setExpanded(p=>({...p,[cat]:!p[cat]}))}
-                style={{display:'flex',alignItems:'center',padding:'12px 14px',borderBottom:'1px solid #FFF3E0',cursor:'pointer',
-                        background:expanded[cat]?'#FFFBF5':'#fff',touchAction:'manipulation'}}>
-                <span style={{fontSize:20,marginRight:10}}>{data.emoji}</span>
-                <span style={{flex:1,fontSize:13,fontWeight:700,color:'#2D3748'}}>{cat}</span>
-                <span style={{fontSize:11,color:'#A0AEC0',marginRight:10}}>{data.items.length} gasto{data.items.length>1?'s':''}</span>
-                <span style={{fontWeight:800,fontSize:14,color:'#744210',marginRight:8}}>{$$(data.total)}</span>
-                <span style={{color:'#A0AEC0',fontSize:12}}>{expanded[cat]?'▲':'▼'}</span>
+                className={`flex items-center px-3.5 py-3 border-b border-[#FFF3E0] cursor-pointer touch-manipulation ${expanded[cat]?'bg-[#FFFBF5]':'bg-white'}`}>
+                <span className="text-xl mr-2.5">{data.emoji}</span>
+                <span className="flex-1 text-[13px] font-bold text-ink">{cat}</span>
+                <span className="text-[11px] text-muted-light mr-2.5">{data.items.length} gasto{data.items.length>1?'s':''}</span>
+                <span className="font-extrabold text-sm text-tab-gastos mr-2 tabular-nums">{$$(data.total)}</span>
+                <span className="text-muted-light text-xs">{expanded[cat]?'▲':'▼'}</span>
               </div>
               {expanded[cat]&&data.items.map((item,i)=>(
                 <div key={i} onClick={()=>selectionMode&&toggleSelected(idOf(item))}
-                  style={{display:'flex',alignItems:'center',padding:'9px 14px 9px 44px',borderBottom:'1px solid #F7FAFC',
-                          background:selectionMode&&selected.has(idOf(item))?'#FFF3E0':'#FAFAFA',
-                          cursor:selectionMode?'pointer':'default',touchAction:'manipulation'}}>
+                  className={`flex items-center pl-11 pr-3.5 py-2.5 border-b border-border-soft touch-manipulation
+                    ${selectionMode&&selected.has(idOf(item))?'bg-[#FFF3E0]':'bg-[#FAFAFA]'} ${selectionMode?'cursor-pointer':'cursor-default'}`}>
                   {selectionMode && (
                     <input type="checkbox" checked={selected.has(idOf(item))} onChange={()=>toggleSelected(idOf(item))}
-                      style={{width:18,height:18,marginRight:10,flexShrink:0}}/>
+                      className="w-[18px] h-[18px] mr-2.5 shrink-0"/>
                   )}
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:13,color:'#2D3748',fontWeight:500}}>{item.key}</div>
-                    <div style={{fontSize:11,color:'#A0AEC0',marginTop:2,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                  <div className="flex-1">
+                    <div className="text-[13px] text-ink font-medium">{item.key}</div>
+                    <div className="text-[11px] text-muted-light mt-0.5 flex gap-2 items-center flex-wrap">
                       {item.origen==='zapia' ? (
                         <>
                           <span>{item.quien==='Germán'?'👨':'👩'}</span>
@@ -344,17 +324,17 @@ export default function Gastos({ zapiaData, appData, saveData, loading, movimien
                         </>
                       ) : (
                         <>
-                          <span style={{background:'#EDE9FE',color:'#553C9A',borderRadius:4,padding:'1px 5px',fontWeight:700}}>💳 {item.tarjeta}</span>
-                          {item.cuotas && <span style={{fontSize:10,background:'#EDE9FE',color:'#553C9A',borderRadius:4,padding:'1px 5px',fontWeight:700}}>{item.cuotas}</span>}
-                          {item.tipoMovimiento && TIPOS_FINANCIEROS.includes(item.tipoMovimiento) && <span style={{fontSize:10,background:'#FED7AA',color:'#744210',borderRadius:4,padding:'1px 5px',fontWeight:700}}>{item.tipoMovimiento}</span>}
+                          <span className="bg-accent-soft text-accent-strong rounded px-1.5 py-0.5 font-bold">💳 {item.tarjeta}</span>
+                          {item.cuotas && <span className="text-[10px] bg-accent-soft text-accent-strong rounded px-1.5 py-0.5 font-bold">{item.cuotas}</span>}
+                          {item.tipoMovimiento && TIPOS_FINANCIEROS.includes(item.tipoMovimiento) && <span className="text-[10px] bg-orange-100 text-tab-gastos rounded px-1.5 py-0.5 font-bold">{item.tipoMovimiento}</span>}
                         </>
                       )}
                       <span>{item.fecha.split('-').reverse().join('/')}</span>
                       {!selectionMode && <button onClick={()=>setEditItem(item)}
-                        style={{border:'none',background:'#EDF2F7',borderRadius:6,cursor:'pointer',fontSize:10,color:'#718096',padding:'2px 6px',fontWeight:600,touchAction:'manipulation'}}>✏️ cambiar</button>}
+                        className="border-none bg-border-soft rounded-md cursor-pointer text-[10px] text-muted px-1.5 py-0.5 font-semibold touch-manipulation">✏️ cambiar</button>}
                     </div>
                   </div>
-                  <span style={{fontWeight:700,fontSize:13,color:'#744210'}}>{$$(item.monto)}</span>
+                  <span className="font-bold text-[13px] text-tab-gastos tabular-nums">{$$(item.monto)}</span>
                 </div>
               ))}
             </div>
@@ -363,40 +343,38 @@ export default function Gastos({ zapiaData, appData, saveData, loading, movimien
       )}
 
       {sinCat.length>0&&(
-        <div style={{background:'#fff',borderRadius:14,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,0.08)'}}>
-          <div style={{background:'#A0AEC0',color:'#fff',padding:'10px 16px',fontWeight:700,fontSize:13}}>📦 Sin categoría ({sinCat.length})</div>
+        <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
+          <div className="bg-muted-light text-white px-4 py-2.5 font-bold text-[13px]">📦 Sin categoría ({sinCat.length})</div>
           {sinCat.map((item,i)=>(
             <div key={i} onClick={()=>selectionMode&&toggleSelected(idOf(item))}
-              style={{display:'flex',alignItems:'center',padding:'10px 14px',borderBottom:i<sinCat.length-1?'1px solid #F0F4F8':'none',
-                      background:selectionMode&&selected.has(idOf(item))?'#FFF3E0':(i%2===0?'#fff':'#F7FAFC'),
-                      cursor:selectionMode?'pointer':'default',touchAction:'manipulation'}}>
+              className={`flex items-center px-3.5 py-2.5 touch-manipulation ${i<sinCat.length-1?'border-b border-border-soft':''}
+                ${selectionMode&&selected.has(idOf(item))?'bg-[#FFF3E0]':(i%2===0?'bg-white':'bg-paper')} ${selectionMode?'cursor-pointer':'cursor-default'}`}>
               {selectionMode && (
                 <input type="checkbox" checked={selected.has(idOf(item))} onChange={()=>toggleSelected(idOf(item))}
-                  style={{width:18,height:18,marginRight:10,flexShrink:0}}/>
+                  className="w-[18px] h-[18px] mr-2.5 shrink-0"/>
               )}
-              <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:600,color:'#2D3748'}}>{item.key}</div>
-                <div style={{fontSize:11,color:'#A0AEC0',marginTop:2}}>
+              <div className="flex-1">
+                <div className="text-[13px] font-semibold text-ink">{item.key}</div>
+                <div className="text-[11px] text-muted-light mt-0.5">
                   {item.origen==='zapia' ? `${item.quien==='Germán'?'👨':'👩'} · ${item.medio==='efectivo'?'💵':'📲'}` : `💳 ${item.tarjeta}`} · {item.fecha.split('-').reverse().join('/')}
                 </div>
               </div>
-              <span style={{fontWeight:800,fontSize:13,color:'#744210',marginRight:10}}>{$$(item.monto)}</span>
+              <span className="font-extrabold text-[13px] text-tab-gastos mr-2.5 tabular-nums">{$$(item.monto)}</span>
               {!selectionMode && <button onClick={()=>setEditItem(item)}
-                style={{border:'none',background:'#EDF2F7',borderRadius:8,cursor:'pointer',fontSize:12,color:'#744210',padding:'5px 10px',fontWeight:700,touchAction:'manipulation'}}>Categorizar</button>}
+                className="border-none bg-border-soft rounded-lg cursor-pointer text-xs text-tab-gastos px-2.5 py-1.5 font-bold touch-manipulation">Categorizar</button>}
             </div>
           ))}
         </div>
       )}
 
       {selectionMode && selected.size > 0 && (
-        <div style={{position:'fixed',left:0,right:0,bottom:70,display:'flex',justifyContent:'center',zIndex:200,padding:'0 16px'}}>
-          <div style={{background:'#1A365D',borderRadius:14,padding:'10px 12px',display:'flex',alignItems:'center',gap:10,
-                       boxShadow:'0 4px 16px rgba(0,0,0,0.25)',width:'100%',maxWidth:500}}>
-            <span style={{color:'#fff',fontSize:13,fontWeight:700,flex:1}}>{selected.size} seleccionado{selected.size>1?'s':''}</span>
+        <div className="fixed left-0 right-0 bottom-[70px] flex justify-center z-[200] px-4">
+          <div className="bg-ink rounded-2xl px-3 py-2.5 flex items-center gap-2.5 shadow-lg w-full max-w-[500px]">
+            <span className="text-white text-[13px] font-bold flex-1">{selected.size} seleccionado{selected.size>1?'s':''}</span>
             <button onClick={()=>setSelected(new Set())}
-              style={{border:'none',background:'rgba(255,255,255,0.15)',borderRadius:8,color:'#fff',padding:'8px 12px',cursor:'pointer',fontSize:12,fontWeight:600,touchAction:'manipulation'}}>Limpiar</button>
+              className="border-none bg-white/15 rounded-lg text-white px-3 py-2 cursor-pointer text-xs font-semibold touch-manipulation">Limpiar</button>
             <button onClick={()=>setBulkEdit(true)}
-              style={{border:'none',background:'#744210',borderRadius:8,color:'#fff',padding:'8px 14px',cursor:'pointer',fontSize:12,fontWeight:700,touchAction:'manipulation'}}>🏷️ Asignar categoría</button>
+              className="border-none bg-tab-gastos rounded-lg text-white px-3.5 py-2 cursor-pointer text-xs font-bold touch-manipulation">🏷️ Asignar categoría</button>
           </div>
         </div>
       )}
