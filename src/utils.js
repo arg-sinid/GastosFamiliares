@@ -1,4 +1,4 @@
-import { categorizarUno } from './categorias.js';
+import { categorizarUno, categorizarMovimientoTarjeta } from './categorias.js';
 
 export const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 export const n=v=>parseFloat(String(v??'').replace(',','.'))||0;
@@ -84,8 +84,8 @@ export const calcularGastosFijosSinTarjetas = (monthly, gastosRecurrentes, mesKe
 // Junta los gastos cargados via Zapia (WhatsApp) y TODOS los movimientos de Tarjetas
 // de un mes, y los agrupa por categoria usando las mismas categorias para ambos.
 // Cuotas van a "Cuotas", financieros a "Pagos/Impuestos/Intereses", y el resto se
-// categoriza con las reglas compartidas (categorias guardadas o categorizarUno).
-export const agruparGastosPorCategoria = (zapiaData, tarjetasData, categories, dolarTarjetaMap, mesKey, tiposFinancieros) => {
+// categoriza con las reglas compartidas (categorizarMovimientoTarjeta / categorizarUno).
+export const agruparGastosPorCategoria = (zapiaData, tarjetasData, categories, dolarTarjetaMap, mesKey) => {
   const zapiaItems = (zapiaData||[])
     .filter(r => r.fecha && monthOf(r.fecha) === mesKey)
     .map(r => ({ key:r.que, monto:r.costo, fecha:r.fecha, quien:r.quien, medio:r.medio, origen:'zapia' }));
@@ -101,18 +101,9 @@ export const agruparGastosPorCategoria = (zapiaData, tarjetasData, categories, d
   const items  = [...zapiaItems, ...tarjetaItems];
   const grupos = {};
   items.forEach(item => {
-    let cat;
-    if (item.origen === 'tarjeta') {
-      if (item.cuotas && item.cuotas.trim() !== '') {
-        cat = { categoria: 'Cuotas', emoji: '\uD83E\uDD9E' };
-      } else if ((tiposFinancieros||[]).includes(item.tipoMovimiento)) {
-        cat = { categoria: 'Pagos/Impuestos/Intereses', emoji: '\uD83D\uDCB0' };
-      } else {
-        cat = categories[item.key] || categorizarUno(item.key);
-      }
-    } else {
-      cat = categories[item.key] || categorizarUno(item.key);
-    }
+    const cat = item.origen === 'tarjeta'
+      ? categorizarMovimientoTarjeta({ comercio:item.key, cuotas:item.cuotas, tipoMovimiento:item.tipoMovimiento }, categories)
+      : (categories[item.key] || categorizarUno(item.key));
     if (!grupos[cat.categoria]) grupos[cat.categoria] = { emoji:cat.emoji, items:[], total:0 };
     grupos[cat.categoria].items.push(item);
     grupos[cat.categoria].total += item.monto;

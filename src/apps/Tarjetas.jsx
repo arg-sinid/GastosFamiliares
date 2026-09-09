@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { $$, n, fmtKey, getKey, monthOpts } from '../utils.js';
 import { categorizarUno, TODAS_CATEGORIAS, emojiCorrectoParaCategoria, TIPOS_FINANCIEROS } from '../categorias.js';
+import { Skeleton } from '../components/ui.jsx';
 
 // Los charts de recharts necesitan valores hex reales (no clases), así que
 // repetimos acá los mismos tonos definidos en src/styles.css.
@@ -294,7 +295,20 @@ export default function Tarjetas({ appData, saveData, movimientos, loading, onRe
         </div>
       )}
 
-      {loading && <div className="text-center p-10 text-muted-light">Cargando...</div>}
+      {loading && (
+        <>
+          {[0,1].map(i => (
+            <div key={i} className="rounded-2xl overflow-hidden mb-3 shadow-sm">
+              <Skeleton className="h-11 rounded-none"/>
+              <div className="bg-white px-4 py-3.5">
+                <Skeleton className="h-2.5 w-20 mb-2.5"/>
+                <Skeleton className="h-7 w-32 mb-3"/>
+                <Skeleton className="h-2.5 w-40"/>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
 
       {!loading && movimientosMes.length === 0 && (
         <div className="text-center px-5 py-12.5 text-muted-light">

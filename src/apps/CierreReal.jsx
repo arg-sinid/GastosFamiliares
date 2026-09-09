@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { $$, n, getKey, fmtKey, monthOpts, calcularGastosFijosSinTarjetas, calcularTotalesTarjetas, agruparGastosPorCategoria } from '../utils.js';
-import { TIPOS_FINANCIEROS } from '../categorias.js';
 
 function LineaInfo({ label, valor, color, sub, bold }) {
   return (
@@ -37,7 +36,7 @@ export default function CierreReal({ appData, zapiaData, tarjetasData, onRefresh
   const fijos = calcularGastosFijosSinTarjetas(monthly, gastosRecurrentes, selKey);
 
   const { grupos, total: totalGastos } = agruparGastosPorCategoria(
-    zapiaData, tarjetasData, categories, dolarTarjetaMap, selKey, TIPOS_FINANCIEROS
+    zapiaData, tarjetasData, categories, dolarTarjetaMap, selKey
   );
   const sortedGrupos = Object.entries(grupos).sort((a,b) => b[1].total - a[1].total);
 

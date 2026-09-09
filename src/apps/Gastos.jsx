@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { $$, n, getKey, fmtKey, getMonday, weekDates, dateStr, monthOf, fmtDate, monthOpts } from '../utils.js';
-import { TODAS_CATEGORIAS, categorizarNuevos, categorizarUno, TIPOS_FINANCIEROS } from '../categorias.js';
+import { TODAS_CATEGORIAS, categorizarNuevos, categorizarUno, categorizarMovimientoTarjeta, TIPOS_FINANCIEROS } from '../categorias.js';
 
 function CatModal({ item, items, categorias, onSave, onClose }) {
   const [customName,  setCustomName]  = useState('');
@@ -164,18 +164,9 @@ export default function Gastos({ zapiaData, appData, saveData, loading, movimien
 
   const grupos = {};
   filtered.forEach(item=>{
-    let cat;
-    if (item.origen === 'tarjeta') {
-      if (item.cuotas && item.cuotas.trim() !== '') {
-        cat = { categoria: 'Cuotas', emoji: '\uD83E\uDD9E' };
-      } else if (TIPOS_FINANCIEROS.includes(item.tipoMovimiento)) {
-        cat = { categoria: 'Pagos/Impuestos/Intereses', emoji: '\uD83D\uDCB0' };
-      } else {
-        cat = categories[item.key] || categorizarUno(item.key);
-      }
-    } else {
-      cat = categories[item.key] || categorizarUno(item.key);
-    }
+    const cat = item.origen === 'tarjeta'
+      ? categorizarMovimientoTarjeta({ comercio:item.key, cuotas:item.cuotas, tipoMovimiento:item.tipoMovimiento }, categories)
+      : (categories[item.key] || categorizarUno(item.key));
     if(!grupos[cat.categoria]) grupos[cat.categoria]={emoji:cat.emoji,items:[],total:0};
     grupos[cat.categoria].items.push(item); grupos[cat.categoria].total+=item.monto;
   });

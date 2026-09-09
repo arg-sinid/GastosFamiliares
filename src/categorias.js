@@ -23,12 +23,37 @@ const REGLAS=[
   {categoria:'Suscripciones',emoji:'📱',palabras:['google','netflix','spotify','disney','hbo','youtube premium','apple music','amazon prime','icloud','chatgpt','claude','paramount','hbo max']},
 ];
 export const TODAS_CATEGORIAS=[...REGLAS.map(r=>({categoria:r.categoria,emoji:r.emoji})),{categoria:'Otros',emoji:'📦'}];
-const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+
+// Los resúmenes de tarjeta traen nombres de comercio "sucios": prefijos de
+// procesadoras de pago (MERPAGO*, MP*, PAGOMISCUENTAS...), separadores "*" y
+// códigos numéricos largos. Zapia en cambio ya manda texto natural. Limpiamos
+// acá ese ruido antes de comparar contra las reglas, para que ambos orígenes
+// se categoricen con la misma calidad.
+const PREFIJOS_RUIDO = [
+  'merpago*','mercadopago*','mp*','pagomiscuentas','pago mis cuentas',
+  'decidir*','pagofacil*','pago facil*','rapipago*','todopago*','todo pago*','debin',
+];
+const norm=s=>{
+  let d = String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+  PREFIJOS_RUIDO.forEach(p => { if (d.startsWith(p)) d = d.slice(p.length).trim(); });
+  d = d.replace(/\*/g,' ').replace(/\b\d{4,}\b/g,' ').replace(/\s{2,}/g,' ').trim();
+  return d;
+};
 export const categorizarUno=desc=>{const d=norm(desc);for(const r of REGLAS){if(r.palabras.some(p=>d.includes(p)))return{categoria:r.categoria,emoji:r.emoji};}return{categoria:'Otros',emoji:'📦'};};
 export const categorizarNuevos=(items,catMap)=>{const mapa={};[...new Set(items.map(i=>i.que).filter(Boolean))].filter(d=>!catMap[d]).forEach(d=>{mapa[d]=categorizarUno(d);});return mapa;};
 
 // Tipos de movimiento de tarjeta que van al bloque "Pagos/Impuestos/Intereses" (no son consumo real)
 export const TIPOS_FINANCIEROS = ['pago','interes','impuesto','comision'];
+
+// Clasifica un movimiento de tarjeta con la MISMA prioridad en todos lados
+// (Gastos, Tarjetas, Cierre Real): 1) cuotas → "Cuotas"  2) financiero → "Pagos/
+// Impuestos/Intereses"  3) el resto → categorización normal (guardada o por reglas).
+// Antes esta lógica estaba copiada y pegada en 3 archivos — ahora vive acá una sola vez.
+export const categorizarMovimientoTarjeta = ({ comercio, cuotas, tipoMovimiento }, categories) => {
+  if (cuotas && cuotas.trim() !== '') return { categoria:'Cuotas', emoji:'\uD83E\uDD9E' };
+  if (TIPOS_FINANCIEROS.includes(tipoMovimiento)) return { categoria:'Pagos/Impuestos/Intereses', emoji:'\uD83D\uDCB0' };
+  return categories[comercio] || categorizarUno(comercio);
+};
 
 // Nombres alternativos que deberían mapear al mismo emoji correcto (variantes con/sin tilde, singular/plural)
 const ALIAS_CATEGORIA = {

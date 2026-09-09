@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { storage } from './storage.js';
 import { calcularTotalesTarjetas } from './utils.js';
+import { SkeletonHero, SkeletonRow } from './components/ui.jsx';
 import ControlGastos from './apps/ControlGastos.jsx';
 import Control       from './apps/Control.jsx';
 import Gastos        from './apps/Gastos.jsx';
@@ -157,17 +158,32 @@ export default function App() {
     setShowSettings(false); setLoading(true); loadData(url);
   };
 
-  if (loading) return (
-    <div className="flex flex-col items-center justify-center h-screen text-muted gap-4 bg-paper">
-      {showSettings && <SettingsModal scriptUrl={scriptUrl} usuario={usuario} metaAhorro={metaAhorro} onSave={saveSettings} onClose={()=>setShowSettings(false)}/>}
-      <div className="text-5xl">💰</div>
-      <div className="text-sm">{scriptUrl?'Cargando datos...':'Configurá el Apps Script para empezar'}</div>
-      {!scriptUrl && (
+  if (loading) {
+    if (!scriptUrl) return (
+      <div className="flex flex-col items-center justify-center h-screen text-muted gap-4 bg-paper">
+        {showSettings && <SettingsModal scriptUrl={scriptUrl} usuario={usuario} metaAhorro={metaAhorro} onSave={saveSettings} onClose={()=>setShowSettings(false)}/>}
+        <div className="text-5xl">💰</div>
+        <div className="text-sm">Configurá el Apps Script para empezar</div>
         <button onClick={()=>setShowSettings(true)}
           className="px-6 py-3 border-none rounded-xl bg-ink text-white font-bold text-sm cursor-pointer touch-manipulation">⚙️ Configurar</button>
-      )}
-    </div>
-  );
+      </div>
+    );
+    // Ya sabemos que hay datos en camino (hay scriptUrl configurado) — en vez de
+    // un texto suelto, mostramos la silueta de la pantalla que va a aparecer.
+    // Esto se "siente" más rápido porque el usuario ya ve la forma del contenido.
+    return (
+      <div className="max-w-[640px] mx-auto p-4 bg-paper min-h-screen">
+        <div className="rounded-2xl px-5 py-4.5 mb-4.5 bg-tab-principal/10">
+          <div className="animate-pulse bg-tab-principal/20 h-5 w-32 rounded mb-2"/>
+          <div className="animate-pulse bg-tab-principal/15 h-3 w-20 rounded"/>
+        </div>
+        <div className="mb-3.5"><SkeletonHero/></div>
+        <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
+          <SkeletonRow/><SkeletonRow/><SkeletonRow/>
+        </div>
+      </div>
+    );
+  }
 
   const NAV = [
     { key:'principal', emoji:'💰', label:'Principal',   colorVar:'--color-tab-principal' },

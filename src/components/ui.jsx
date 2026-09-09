@@ -44,6 +44,38 @@ export function Badge({ children, tone='accent' }) {
   );
 }
 
+// Bloque base para skeleton loaders — un rectángulo gris que "respira"
+// mientras se espera la data real. Los componentes de abajo lo combinan
+// para armar la silueta de cada pantalla.
+export function Skeleton({ className='' }) {
+  return <div className={`animate-pulse bg-border-soft rounded-lg ${className}`} />;
+}
+
+// Silueta de una fila tipo "lista" (usada en Tarjetas, Gastos, etc.)
+export function SkeletonRow() {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 bg-white">
+      <Skeleton className="w-9 h-9 rounded-full shrink-0"/>
+      <div className="flex-1 flex flex-col gap-1.5">
+        <Skeleton className="h-3 w-2/3"/>
+        <Skeleton className="h-2.5 w-1/3"/>
+      </div>
+      <Skeleton className="h-4 w-16"/>
+    </div>
+  );
+}
+
+// Silueta de una tarjeta "hero" (el bloque grande con el número principal)
+export function SkeletonHero() {
+  return (
+    <div className="rounded-2xl px-5 py-5 bg-white shadow-sm">
+      <Skeleton className="h-2.5 w-24 mb-3"/>
+      <Skeleton className="h-9 w-40 mb-2"/>
+      <Skeleton className="h-2.5 w-32"/>
+    </div>
+  );
+}
+
 // Botón chico estilo "chip" (usado en headers de pantalla: refrescar, editar categorías, etc.)
 export function ChipButton({ children, onClick, active, disabled, dark }) {
   const base = 'text-xs font-bold rounded-lg px-3 py-1.5 cursor-pointer touch-manipulation border';
