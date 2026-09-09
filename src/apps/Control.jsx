@@ -68,13 +68,21 @@ export default function Control({ appData, saveData, zapiaData, onRefresh }) {
 
   const gastosZapiaJuli = periodZapia.filter(r => r.quien === 'Julieta' && r.medio === 'transferencia').reduce((s,r) => s + r.costo, 0);
 
+  // Si el mes pasado cerró en rojo, esa deuda se paga en la práctica con la
+  // primera transferencia real del mes — no es "gasto hormiga", es un pago
+  // real. La restamos antes de calcular el resultado de Julieta.
+  const esPrimerDomingoDelMes = (fechaStr) => new Date(fechaStr + 'T12:00:00').getDate() <= 7;
+  const mesKeyDeuda = filtro === 'semana' ? monthOf(sundayStr) : mesKey;
+  const deudaMes    = n(appData.monthly?.[mesKeyDeuda]?.deuda_anterior);
+  const deudaPagada = filtro === 'mes' ? deudaMes : (esPrimerDomingoDelMes(sundayStr) ? deudaMes : 0);
+
   const getSaldoJuli = () => {
     if (filtro === 'semana') return n(saldoJulieta[sundayStr]);
     const keys = Object.keys(saldoJulieta).filter(k => monthOf(k) === mesKey).sort();
     return keys.length ? n(saldoJulieta[keys[keys.length - 1]]) : 0;
   };
   const saldoJuli = getSaldoJuli();
-  const resultadoJulieta = transferido - gastosZapiaJuli - saldoJuli;
+  const resultadoJulieta = transferido - deudaPagada - gastosZapiaJuli - saldoJuli;
 
   const guardarSaldoJuli = async () => {
     if (!saldoJuliInput) return;
@@ -141,6 +149,7 @@ export default function Control({ appData, saveData, zapiaData, onRefresh }) {
         <div className="bg-julieta text-white px-4 py-2.5 font-bold text-[13px]">👩 Julieta</div>
         <LineaInfo label="Transferido a Julieta" valor={transferido} color="var(--color-tab-tarjetas)"/>
         <LineaInfo label="Gastos Zapia via transferencia" valor={gastosZapiaJuli} color="var(--color-tab-gastos)"/>
+        {deudaPagada > 0 && <LineaInfo label="Deuda mes anterior (pagada con esta transf.)" valor={deudaPagada} color="var(--color-accent-strong)"/>}
         <div className="px-4 py-3 border-t border-border-soft">
           <div className="text-xs text-muted mb-2 font-semibold">
             💳 Saldo real en cuenta — {filtro==='semana' ? `domingo ${fmtDate(sunday)}` : `último domingo del mes`}
@@ -164,7 +173,7 @@ export default function Control({ appData, saveData, zapiaData, onRefresh }) {
           </div>
           <div className="text-[11px] text-muted-light mt-1.5">Lo carga Julieta el domingo o al cierre del mes.</div>
         </div>
-        {(transferido > 0 || gastosZapiaJuli > 0 || saldoJuli > 0) && <ResultadoCard label="Resultado Julieta" valor={resultadoJulieta}/>}
+        {(transferido > 0 || gastosZapiaJuli > 0 || saldoJuli > 0 || deudaPagada > 0) && <ResultadoCard label="Resultado Julieta" valor={resultadoJulieta}/>}
         {transferido === 0 && <div className="p-4 text-center text-muted-light text-[13px]">Sin transferencias registradas {filtro==='semana'?'esta semana':'este mes'}.</div>}
       </div>
     </div>
