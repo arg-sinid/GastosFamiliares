@@ -14,7 +14,7 @@ const SK_USUARIO = 'usuario_v1';
 const SK_META    = 'meta_ahorro_v1';
 const EMPTY_DATA = () => ({
   monthly:{}, categories:{}, uberDiDi:[],
-  gastosRecurrentes:{}, saldoJulieta:{}, dolarTarjeta:{}
+  gastosRecurrentes:{}, saldoJulieta:{}, dolarTarjeta:{}, ahorroMovimientos:[]
 });
 
 function isLastTuesdayOfMonth() {
@@ -101,6 +101,7 @@ export default function App() {
           gastosRecurrentes: d1.data.gastosRecurrentes  || {},
           saldoJulieta:      d1.data.saldoJulieta       || {},
           dolarTarjeta:      d1.data.dolarTarjeta       || {},
+          ahorroMovimientos: d1.data.ahorroMovimientos  || [],
         });
       }
       if (d2.status==='ok' && d2.data) setZapiaData(d2.data);
@@ -142,6 +143,7 @@ export default function App() {
           gastosRecurrentes: newData.gastosRecurrentes,
           saldoJulieta:      newData.saldoJulieta,
           dolarTarjeta:      newData.dolarTarjeta,
+          ahorroMovimientos: newData.ahorroMovimientos,
           totalesTarjetas,
         })
       });
@@ -168,9 +170,6 @@ export default function App() {
           className="px-6 py-3 border-none rounded-xl bg-ink text-white font-bold text-sm cursor-pointer touch-manipulation">⚙️ Configurar</button>
       </div>
     );
-    // Ya sabemos que hay datos en camino (hay scriptUrl configurado) — en vez de
-    // un texto suelto, mostramos la silueta de la pantalla que va a aparecer.
-    // Esto se "siente" más rápido porque el usuario ya ve la forma del contenido.
     return (
       <div className="max-w-[640px] mx-auto p-4 bg-paper min-h-screen">
         <div className="rounded-2xl px-5 py-4.5 mb-4.5 bg-tab-principal/10">

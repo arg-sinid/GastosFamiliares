@@ -31,15 +31,15 @@ function getDataSheet() {
 function readAppData() {
   try {
     const val = getDataSheet().getRange("A1").getValue();
-    if (!val) return { monthly:{}, categories:{}, uberDiDi:[], gastosRecurrentes:{}, saldoJulieta:{}, dolarTarjeta:{} };
+    if (!val) return { monthly:{}, categories:{}, uberDiDi:[], gastosRecurrentes:{}, saldoJulieta:{}, dolarTarjeta:{}, ahorroMovimientos:[] };
     const d = JSON.parse(val);
     return {
       monthly: d.monthly||{}, categories: d.categories||{}, uberDiDi: d.uberDiDi||[],
       gastosRecurrentes: d.gastosRecurrentes||{}, saldoJulieta: d.saldoJulieta||{},
-      dolarTarjeta: d.dolarTarjeta||{}
+      dolarTarjeta: d.dolarTarjeta||{}, ahorroMovimientos: d.ahorroMovimientos||[]
     };
   } catch(e) {
-    return { monthly:{}, categories:{}, uberDiDi:[], gastosRecurrentes:{}, saldoJulieta:{}, dolarTarjeta:{} };
+    return { monthly:{}, categories:{}, uberDiDi:[], gastosRecurrentes:{}, saldoJulieta:{}, dolarTarjeta:{}, ahorroMovimientos:[] };
   }
 }
 function writeAppData(data) { getDataSheet().getRange("A1").setValue(JSON.stringify(data)); }
@@ -149,9 +149,10 @@ function doPost(e) {
     const gastosRecurrentes = payload.gastosRecurrentes || {};
     const saldoJulieta     = payload.saldoJulieta      || {};
     const dolarTarjeta     = payload.dolarTarjeta      || {};
+    const ahorroMovimientos = payload.ahorroMovimientos || [];
     const totalesTarjetas  = payload.totalesTarjetas   || {}; // { "2026-08": { icbc: 123, bna: 456 } }
 
-    writeAppData({ monthly:allData, categories, uberDiDi, gastosRecurrentes, saldoJulieta, dolarTarjeta });
+    writeAppData({ monthly:allData, categories, uberDiDi, gastosRecurrentes, saldoJulieta, dolarTarjeta, ahorroMovimientos });
 
     const ss=SpreadsheetApp.openById(SHEET_ID);
 

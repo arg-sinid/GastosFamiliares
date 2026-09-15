@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
-import { n, $$, getKey, fmtKey, monthOpts, calcularTotalesTarjetas, calcularIngresoGerman } from '../utils.js';
+import { n, $$, getKey, fmtKey, monthOpts, calcularTotalesTarjetas, calcularIngresoGerman, calcularAhorroManual, uid, hoy } from '../utils.js';
 import { MoneyInput } from '../components/ui.jsx';
 
 const GASTOS_KEYS = ['icbc','bna','prestamos','nicolas','segundo','alquiler'];
@@ -33,6 +33,58 @@ const calcAhorroAcum = (allData, upTo, uberDiDi, zapiaData) =>
     return s + Math.max(0, calcTotals(allData[k], gi).saldo);
   }, 0);
 
+// Formulario chico para cargar un movimiento manual de ahorro (ingreso o retiro)
+function AhorroForm({ tipo, onSave, onCancel }) {
+  const [monto, setMonto]     = useState('');
+  const [desc, setDesc]       = useState('');
+  const [subtipo, setSubtipo] = useState('ingreso_extra');
+  const esIngreso = tipo === 'ingreso';
+
+  return (
+    <div className="bg-[#FAFAFA] rounded-xl p-3.5 mb-3.5 border border-border">
+      {esIngreso && (
+        <div className="flex gap-2 mb-2.5">
+          {[['ingreso_extra','Ingreso extra'],['ajuste_inicial','Ajuste inicial']].map(([k,label]) => (
+            <button key={k} onClick={()=>setSubtipo(k)}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-bold border touch-manipulation ${subtipo===k?'bg-positive text-white border-positive':'bg-white text-muted border-border'}`}>{label}</button>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-1 bg-white rounded-lg border-[1.5px] border-border px-3 py-2 mb-2.5">
+        <span className="text-muted-light">$</span>
+        <input type="number" inputMode="numeric" value={monto} onChange={e=>setMonto(e.target.value)} placeholder="0" autoFocus
+          className="flex-1 border-none outline-none text-lg font-bold text-ink bg-transparent tabular-nums"/>
+      </div>
+      <input value={desc} onChange={e=>setDesc(e.target.value)}
+        placeholder={esIngreso ? 'Ej: aguinaldo, changa...' : 'Ej: pago de deuda, arreglo del auto...'}
+        className="w-full px-3 py-2 rounded-lg border-[1.5px] border-border text-sm outline-none mb-2.5"/>
+      <div className="flex gap-2">
+        <button onClick={onCancel} className="flex-1 py-2 border-[1.5px] border-border rounded-lg bg-white text-muted font-semibold text-xs touch-manipulation">Cancelar</button>
+        <button onClick={()=>{ if(!monto) return; onSave({ tipo: esIngreso?subtipo:'retiro', monto:n(monto), descripcion:desc.trim() }); }}
+          className={`flex-[2] py-2 border-none rounded-lg text-white font-bold text-xs touch-manipulation ${esIngreso?'bg-positive':'bg-negative'}`}>Guardar</button>
+      </div>
+    </div>
+  );
+}
+
+// Fila de un movimiento manual ya guardado, en la lista de abajo
+function AhorroMovimientoRow({ m, onBorrar }) {
+  const esRetiro = m.tipo === 'retiro';
+  const label = { retiro:'Retiro', ingreso_extra:'Ingreso extra', ajuste_inicial:'Ajuste inicial' }[m.tipo] || m.tipo;
+  const icon  = esRetiro ? '➖' : m.tipo === 'ajuste_inicial' ? '🏁' : '➕';
+  return (
+    <div className="flex items-center px-4 py-2.5 border-b border-border-soft">
+      <span className="text-base mr-2.5">{icon}</span>
+      <div className="flex-1">
+        <div className="text-[13px] text-ink font-medium">{m.descripcion || label}</div>
+        <div className="text-[11px] text-muted-light mt-0.5">{label} · {m.fecha.split('-').reverse().join('/')}</div>
+      </div>
+      <span className={`font-bold text-[13px] tabular-nums mr-2 ${esRetiro?'text-negative':'text-positive'}`}>{esRetiro?'−':'+'}{$$(m.monto)}</span>
+      <button onClick={()=>onBorrar(m.id)} className="border-none bg-none cursor-pointer text-border text-lg touch-manipulation">×</button>
+    </div>
+  );
+}
+
 export default function ControlGastos({ appData, saveData, zapiaData, tarjetasData, syncing, syncStatus, onForceSync, usuario, metaAhorro, onOpenSettings }) {
   const today      = new Date();
   const currentKey = getKey(today);
@@ -42,11 +94,22 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
   const [saving,   setSaving]   = useState(false);
   const [savedOk,  setSavedOk]  = useState(false);
   const [edit,     setEdit]     = useState(null);
+  const [formAhorro, setFormAhorro] = useState(null); // null | 'ingreso' | 'retiro'
 
   const allData     = appData.monthly           || {};
   const uberDiDi     = appData.uberDiDi          || [];
   const recurrentes  = appData.gastosRecurrentes || {};
   const dolarTarjetaMap = appData.dolarTarjeta   || {};
+  const ahorroMovimientos = appData.ahorroMovimientos || [];
+
+  const agregarMovimientoAhorro = async ({ tipo, monto, descripcion }) => {
+    const nuevo = { id: uid(), fecha: hoy(), tipo, monto, descripcion };
+    await saveData({ ...appData, ahorroMovimientos: [nuevo, ...ahorroMovimientos] });
+    setFormAhorro(null);
+  };
+  const borrarMovimientoAhorro = async (id) => {
+    await saveData({ ...appData, ahorroMovimientos: ahorroMovimientos.filter(m=>m.id!==id) });
+  };
 
   const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, dolarTarjetaMap);
 
@@ -69,7 +132,7 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
 
   const germanIncome = calcularIngresoGerman(uberDiDi, selKey, zapiaData);
   const tot        = calcTotals(mesEdit, germanIncome);
-  const ahorroAcum = calcAhorroAcum(allData, selKey, uberDiDi, zapiaData);
+  const ahorroAcum = calcAhorroAcum(allData, selKey, uberDiDi, zapiaData) + calcularAhorroManual(ahorroMovimientos, selKey);
   const meta       = n(metaAhorro);
 
   const updateField = (section, field, value) => {
@@ -336,9 +399,20 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
         <>
           <div className="rounded-2xl px-5 py-5.5 mb-3.5 text-center bg-gradient-to-br from-positive-soft to-[#B2F5EA] border-2 border-[#81E6D9]">
             <div className="text-[11px] font-bold uppercase tracking-wide text-[#234E52] mb-1.5">Ahorro total acumulado</div>
-            <div className="text-[40px] font-extrabold text-[#2B7A78] tracking-tight tabular-nums">{$$(calcAhorroAcum(allData,'9999-99',uberDiDi,zapiaData))}</div>
+            <div className="text-[40px] font-extrabold text-[#2B7A78] tracking-tight tabular-nums">
+              {$$(calcAhorroAcum(allData,'9999-99',uberDiDi,zapiaData) + calcularAhorroManual(ahorroMovimientos))}
+            </div>
             {metaAhorro && <div className="text-xs text-[#4A9E9A] mt-1.5">Meta mensual: {$$(n(metaAhorro))}</div>}
           </div>
+
+          <div className="flex gap-2 mb-3.5">
+            <button onClick={()=>setFormAhorro(formAhorro==='ingreso'?null:'ingreso')}
+              className={`flex-1 py-2.5 border-none rounded-xl font-bold text-sm text-white touch-manipulation ${formAhorro==='ingreso'?'bg-[#236348]':'bg-positive'}`}>+ Ingreso</button>
+            <button onClick={()=>setFormAhorro(formAhorro==='retiro'?null:'retiro')}
+              className={`flex-1 py-2.5 border-none rounded-xl font-bold text-sm text-white touch-manipulation ${formAhorro==='retiro'?'bg-[#8C3A2A]':'bg-negative'}`}>− Retiro/Gasto</button>
+          </div>
+          {formAhorro && <AhorroForm tipo={formAhorro} onSave={agregarMovimientoAhorro} onCancel={()=>setFormAhorro(null)}/>}
+
           {ahorroChart.length>0 && (
             <div className="bg-white rounded-2xl px-3 py-4 mb-3.5 shadow-sm">
               <ResponsiveContainer width="100%" height={180}>
@@ -352,9 +426,17 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
               </ResponsiveContainer>
             </div>
           )}
+
+          {ahorroMovimientos.length>0 && (
+            <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
+              <div className="bg-ink text-white px-4 py-2.5 font-bold text-[13px]">Movimientos manuales</div>
+              {ahorroMovimientos.map(m => <AhorroMovimientoRow key={m.id} m={m} onBorrar={borrarMovimientoAhorro}/>)}
+            </div>
+          )}
+
           {savedKeys.length>0 && (
             <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
-              <div className="bg-[#2B7A78] text-white px-4 py-2.5 font-bold text-[13px]">Detalle por mes</div>
+              <div className="bg-[#2B7A78] text-white px-4 py-2.5 font-bold text-[13px]">Detalle por mes (automático)</div>
               <table className="w-full border-collapse text-xs">
                 <thead><tr className="bg-positive-soft">{['Mes','Saldo','Acumulado'].map(h=><th key={h} className={`px-3 py-2 ${h==='Mes'?'text-left':'text-right'} text-[#234E52] font-bold border-b border-[#B2F5EA] text-[11px]`}>{h}</th>)}</tr></thead>
                 <tbody>{(()=>{ let c=0; return savedKeys.map((k,i)=>{

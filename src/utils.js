@@ -14,6 +14,18 @@ export const uid=()=>Math.random().toString(36).slice(2,9);
 export const hoy=()=>new Date().toISOString().split('T')[0];
 export const monthOpts=today=>{const o=[];for(let i=-4;i<=8;i++){const d=new Date(today.getFullYear(),today.getMonth()+i,1);o.push(getKey(d));}return o;};
 
+// Los últimos N meses (incluyendo mesKey), en orden cronológico — usado
+// para armar el gráfico de tendencia de una categoría.
+export const ultimosMeses = (mesKey, cantidad=6) => {
+  const [y,m] = mesKey.split('-').map(Number);
+  const out = [];
+  for (let i = cantidad-1; i >= 0; i--) {
+    const d = new Date(y, m-1-i, 1);
+    out.push(getKey(d));
+  }
+  return out;
+};
+
 // ¿La fecha dada (string YYYY-MM-DD) es el último día de su mes?
 export const esUltimoDiaMes = (fechaStr) => {
   if (!fechaStr) return false;
@@ -111,3 +123,18 @@ export const agruparGastosPorCategoria = (zapiaData, tarjetasData, categories, d
 
   return { items, grupos, total: items.reduce((s,i)=>s+i.monto,0) };
 };
+
+// Total de los movimientos MANUALES de ahorro (ajuste inicial, ingresos
+// extraordinarios, retiros) hasta un mes dado (o todos, si no se pasa upTo).
+// Se suma aparte del acumulado automático de saldos mensuales positivos.
+export const calcularAhorroManual = (movimientos, upTo) => (movimientos||[])
+  .filter(m => !upTo || (m.fecha && m.fecha.slice(0,7) <= upTo))
+  .reduce((s,m) => s + (m.tipo === 'retiro' ? -n(m.monto) : n(m.monto)), 0);
+
+// Total de UNA categoría específica en cada uno de los meses dados —
+// alimenta el gráfico de tendencia que aparece al abrir una categoría.
+export const historialCategoriaPorMes = (categoria, zapiaData, tarjetasData, categories, dolarTarjetaMap, mesesKeys) =>
+  mesesKeys.map(mes => {
+    const { grupos } = agruparGastosPorCategoria(zapiaData, tarjetasData, categories, dolarTarjetaMap, mes);
+    return { mes: fmtKey(mes).split(' ')[0].substring(0,3), total: grupos[categoria]?.total || 0 };
+  });
