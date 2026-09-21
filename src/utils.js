@@ -34,19 +34,49 @@ export const esUltimoDiaMes = (fechaStr) => {
   return next.getMonth() !== d.getMonth();
 };
 
-// Ingreso de Germán en un mes:
-//   (transferencias dominicales − gastos de Julieta vía transferencia registrados en Zapia ese mes)
-//   + efectivo depositado al cierre del mes
-// La resta evita contar como "ahorro" plata que Julieta ya gastó del día a día.
-export const calcularIngresoGerman = (uberDiDi, mesKey, zapiaData) => {
-  const enMes = (uberDiDi||[]).filter(r => r.fecha && r.fecha.slice(0,7) === mesKey);
-  const transferencias = enMes.filter(r => r.transferencia > 0).reduce((s,r)=>s+r.transferencia, 0);
-  const cierreMes      = enMes.filter(r => r.efectivoCierreMes > 0).reduce((s,r)=>s+r.efectivoCierreMes, 0);
-  const gastosJulietaTransf = (zapiaData||[])
-    .filter(r => r.fecha && r.fecha.slice(0,7) === mesKey && r.quien === 'Julieta' && r.medio === 'transferencia')
-    .reduce((s,r) => s + r.costo, 0);
-  const transferenciasNetas = Math.max(0, transferencias - gastosJulietaTransf);
-  return transferenciasNetas + cierreMes;
+// Reconstruye los períodos entre cargas CONSECUTIVAS del saldo real de
+// Julieta. Cada período cierra en la fecha de una carga real; el anterior
+// (o el primero, si no hay uno previo) queda sin período — no hay saldo de
+// referencia contra el cual comparar. Si Julieta se salteó semanas, el
+// período simplemente se estira hasta la próxima carga real: todo lo
+// transferido y gastado en el medio se reconcilia junto, de una.
+//   ingresoGerman = diferencia real de saldo (S1 − S0), nunca negativo
+//   gastoHormiga  = lo transferido y no gastado (registrado) ni tampoco
+//                   presente en el saldo final — la plata que se evaporó
+export const calcularReconciliacionJulieta = (saldoJulieta, uberDiDi, zapiaData) => {
+  const fechas = Object.keys(saldoJulieta||{}).sort();
+  const periodos = [];
+  for (let i = 1; i < fechas.length; i++) {
+    const fIni = fechas[i-1], fFin = fechas[i];
+    const saldoIni = n(saldoJulieta[fIni]), saldoFin = n(saldoJulieta[fFin]);
+    const transferido = (uberDiDi||[])
+      .filter(r => r.fecha && r.fecha > fIni && r.fecha <= fFin)
+      .reduce((s,r) => s + (r.transferencia||0), 0);
+    const gastosZapia = (zapiaData||[])
+      .filter(r => r.fecha && r.fecha > fIni && r.fecha <= fFin && r.quien === 'Julieta' && r.medio === 'transferencia')
+      .reduce((s,r) => s + r.costo, 0);
+    const delta = saldoFin - saldoIni;
+    periodos.push({
+      fechaInicio: fIni, fechaFin: fFin, saldoIni, saldoFin, transferido, gastosZapia,
+      ingresoGerman: Math.max(0, delta),
+      gastoHormiga:  Math.max(0, transferido - gastosZapia - delta),
+    });
+  }
+  return periodos;
+};
+
+// Ingreso de Germán en un mes: la parte que se reconcilia por la diferencia
+// real de saldo de Julieta (ver arriba) + el efectivo depositado al cierre
+// del mes. Un período se atribuye al mes de su fecha de CIERRE (cuando
+// Julieta reporta el saldo y recién ahí se sabe cuánto quedó realmente).
+export const calcularIngresoGerman = (uberDiDi, mesKey, zapiaData, saldoJulieta) => {
+  const cierreMes = (uberDiDi||[])
+    .filter(r => r.fecha && r.fecha.slice(0,7) === mesKey && r.efectivoCierreMes > 0)
+    .reduce((s,r) => s + r.efectivoCierreMes, 0);
+  const reconciliado = calcularReconciliacionJulieta(saldoJulieta, uberDiDi, zapiaData)
+    .filter(p => p.fechaFin.slice(0,7) === mesKey)
+    .reduce((s,p) => s + p.ingresoGerman, 0);
+  return reconciliado + cierreMes;
 };
 
 // Calcula el total de cada tarjeta por mes a partir de los movimientos cargados por Zapia

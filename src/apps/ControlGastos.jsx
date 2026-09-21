@@ -27,9 +27,9 @@ const calcTotals = (data, germanIncome) => {
   return { ing, gas, deuda, egresos, saldo: ing - egresos, germanIncome };
 };
 
-const calcAhorroAcum = (allData, upTo, uberDiDi, zapiaData) =>
+const calcAhorroAcum = (allData, upTo, uberDiDi, zapiaData, saldoJulieta) =>
   Object.keys(allData).sort().filter(k => k <= upTo).reduce((s, k) => {
-    const gi = calcularIngresoGerman(uberDiDi, k, zapiaData);
+    const gi = calcularIngresoGerman(uberDiDi, k, zapiaData, saldoJulieta);
     return s + Math.max(0, calcTotals(allData[k], gi).saldo);
   }, 0);
 
@@ -101,6 +101,7 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
   const recurrentes  = appData.gastosRecurrentes || {};
   const dolarTarjetaMap = appData.dolarTarjeta   || {};
   const ahorroMovimientos = appData.ahorroMovimientos || [];
+  const saldoJulieta = appData.saldoJulieta || {};
 
   const agregarMovimientoAhorro = async ({ tipo, monto, descripcion }) => {
     const nuevo = { id: uid(), fecha: hoy(), tipo, monto, descripcion };
@@ -130,9 +131,9 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
   const mesData = getMes(selKey);
   const mesEdit = edit && edit.key === selKey ? edit.data : mesData;
 
-  const germanIncome = calcularIngresoGerman(uberDiDi, selKey, zapiaData);
+  const germanIncome = calcularIngresoGerman(uberDiDi, selKey, zapiaData, saldoJulieta);
   const tot        = calcTotals(mesEdit, germanIncome);
-  const ahorroAcum = calcAhorroAcum(allData, selKey, uberDiDi, zapiaData) + calcularAhorroManual(ahorroMovimientos, selKey);
+  const ahorroAcum = calcAhorroAcum(allData, selKey, uberDiDi, zapiaData, saldoJulieta) + calcularAhorroManual(ahorroMovimientos, selKey);
   const meta       = n(metaAhorro);
 
   const updateField = (section, field, value) => {
@@ -176,18 +177,18 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
 
   const savedKeys = Object.keys(allData).sort();
   const chartData = savedKeys.slice(-6).map(k => {
-    const gi = calcularIngresoGerman(uberDiDi, k, zapiaData);
+    const gi = calcularIngresoGerman(uberDiDi, k, zapiaData, saldoJulieta);
     const t = calcTotals(allData[k], gi);
     return { mes:fmtKey(k).split(' ')[0].substring(0,3), Ingresos:t.ing, Gastos:t.gas, Saldo:Math.max(0,t.saldo) };
   });
   let rAcum = 0;
   const ahorroChart = savedKeys.map(k => {
-    const gi = calcularIngresoGerman(uberDiDi, k, zapiaData);
+    const gi = calcularIngresoGerman(uberDiDi, k, zapiaData, saldoJulieta);
     const t = calcTotals(allData[k], gi); rAcum += Math.max(0, t.saldo);
     return { mes:fmtKey(k).split(' ')[0].substring(0,3), 'Ahorro acum.':rAcum };
   });
   const histRows = savedKeys.map(k => {
-    const gi = calcularIngresoGerman(uberDiDi, k, zapiaData);
+    const gi = calcularIngresoGerman(uberDiDi, k, zapiaData, saldoJulieta);
     return { k, ...calcTotals(allData[k], gi) };
   }).reverse();
 
@@ -400,7 +401,7 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
           <div className="rounded-2xl px-5 py-5.5 mb-3.5 text-center bg-gradient-to-br from-positive-soft to-[#B2F5EA] border-2 border-[#81E6D9]">
             <div className="text-[11px] font-bold uppercase tracking-wide text-[#234E52] mb-1.5">Ahorro total acumulado</div>
             <div className="text-[40px] font-extrabold text-[#2B7A78] tracking-tight tabular-nums">
-              {$$(calcAhorroAcum(allData,'9999-99',uberDiDi,zapiaData) + calcularAhorroManual(ahorroMovimientos))}
+              {$$(calcAhorroAcum(allData,'9999-99',uberDiDi,zapiaData,saldoJulieta) + calcularAhorroManual(ahorroMovimientos))}
             </div>
             {metaAhorro && <div className="text-xs text-[#4A9E9A] mt-1.5">Meta mensual: {$$(n(metaAhorro))}</div>}
           </div>
@@ -440,7 +441,7 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
               <table className="w-full border-collapse text-xs">
                 <thead><tr className="bg-positive-soft">{['Mes','Saldo','Acumulado'].map(h=><th key={h} className={`px-3 py-2 ${h==='Mes'?'text-left':'text-right'} text-[#234E52] font-bold border-b border-[#B2F5EA] text-[11px]`}>{h}</th>)}</tr></thead>
                 <tbody>{(()=>{ let c=0; return savedKeys.map((k,i)=>{
-                  const gi=calcularIngresoGerman(uberDiDi, k, zapiaData);
+                  const gi=calcularIngresoGerman(uberDiDi, k, zapiaData, saldoJulieta);
                   const t=calcTotals(allData[k],gi); c+=Math.max(0,t.saldo);
                   return(<tr key={k} className={i%2===0?'bg-white':'bg-[#F0FFFE]'}><td className="px-3 py-2.5 font-semibold text-ink">{fmtKey(k)}</td><td className={`px-3 py-2.5 text-right font-bold tabular-nums ${t.saldo>=0?'text-[#2B7A78]':'text-negative'}`}>{$$(t.saldo)}</td><td className="px-3 py-2.5 text-right font-extrabold text-[#2B7A78] tabular-nums">{$$(c)}</td></tr>);
                 });})()}</tbody>
