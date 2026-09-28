@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { $$, n, getKey, getMonday, weekDates, dateStr, monthOf, fmtDate, calcularReconciliacionJulieta } from '../utils.js';
+import { $$, n, getKey, getMonday, weekDates, dateStr, monthOf, fmtDate, hoy, calcularReconciliacionJulieta } from '../utils.js';
 
 function ResultadoCard({ label, valor }) {
   const ok = valor >= 0;
@@ -70,16 +70,43 @@ export default function Control({ appData, saveData, zapiaData, onRefresh }) {
 
   // Reconciliación real: compara cada carga de saldo de Julieta contra la
   // anterior (S0), así el gasto hormiga sale de lo que NO se explica ni por
-  // gastos registrados ni por lo que quedó en el saldo real — sin este punto
-  // de referencia, comparar solo contra el saldo de hoy da un resultado falso.
+  // gastos registrados ni por lo que quedó en el saldo real.
   const periodosJulieta = calcularReconciliacionJulieta(saldoJulieta, uberDiDi, zapiaData);
   const periodoSemana   = filtro==='semana' ? periodosJulieta.find(p => p.fechaFin === sundayStr) : null;
   const periodosMes     = filtro==='mes'    ? periodosJulieta.filter(p => p.fechaFin.slice(0,7) === mesKey) : [];
+  const esMesActual     = mesKey === getKey(today);
+
+  // Período ABIERTO: desde la última carga real hasta hoy, todavía sin
+  // cerrar. Si hoy es lunes y Julieta cargó ayer domingo, ese domingo cae
+  // en "la semana pasada" con el calendario Lun-Dom — sin esto, la pantalla
+  // mostraría "no cargó" a pesar de que sí hay un dato reciente y válido.
+  const fechasCargadas = Object.keys(saldoJulieta).sort();
+  const ultimaFecha = fechasCargadas.length ? fechasCargadas[fechasCargadas.length-1] : null;
+  let periodoAbierto = null;
+  if (ultimaFecha) {
+    const hoyStr = hoy();
+    const S0 = n(saldoJulieta[ultimaFecha]);
+    const transferidoAbierto = uberDiDi
+      .filter(r => r.fecha && r.fecha > ultimaFecha && r.fecha <= hoyStr)
+      .reduce((s,r) => s + (r.transferencia||0), 0);
+    const gastosAbierto = zapiaData
+      .filter(r => r.fecha && r.fecha > ultimaFecha && r.fecha <= hoyStr && r.quien === 'Julieta' && r.medio === 'transferencia')
+      .reduce((s,r) => s + r.costo, 0);
+    periodoAbierto = {
+      fechaInicio: ultimaFecha, saldoIni: S0,
+      transferido: transferidoAbierto, gastosZapia: gastosAbierto,
+      saldoEstimado: S0 + transferidoAbierto - gastosAbierto,
+    };
+  }
 
   const hayReconciliacion = filtro==='semana' ? !!periodoSemana : periodosMes.length>0;
-  const gastoHormiga    = filtro==='semana' ? (periodoSemana?.gastoHormiga||0)   : periodosMes.reduce((s,p)=>s+p.gastoHormiga,0);
+  const mostrarAbierto = !hayReconciliacion && periodoAbierto && (
+    (filtro==='semana') || (filtro==='mes' && esMesActual)
+  );
+
+  const gastoHormiga      = filtro==='semana' ? (periodoSemana?.gastoHormiga||0)   : periodosMes.reduce((s,p)=>s+p.gastoHormiga,0);
   const ingresoGermanJuli = filtro==='semana' ? (periodoSemana?.ingresoGerman||0) : periodosMes.reduce((s,p)=>s+p.ingresoGerman,0);
-  const resultadoJulieta = -gastoHormiga; // negativo si hubo gasto hormiga, 0 si cerró justo
+  const resultadoJulieta  = -gastoHormiga; // negativo si hubo gasto hormiga, 0 si cerró justo
 
   const getSaldoJuli = () => {
     if (filtro === 'semana') return n(saldoJulieta[sundayStr]);
@@ -151,6 +178,7 @@ export default function Control({ appData, saveData, zapiaData, onRefresh }) {
 
       <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
         <div className="bg-julieta text-white px-4 py-2.5 font-bold text-[13px]">👩 Julieta</div>
+
         {hayReconciliacion ? (
           <>
             {filtro==='semana' ? (
@@ -162,11 +190,21 @@ export default function Control({ appData, saveData, zapiaData, onRefresh }) {
             <LineaInfo label="Gastos Zapia via transferencia" valor={filtro==='semana'?periodoSemana.gastosZapia:periodosMes.reduce((s,p)=>s+p.gastosZapia,0)} color="var(--color-tab-gastos)"/>
             <LineaInfo label="Ingreso real de Germán (diferencia de saldo)" valor={ingresoGermanJuli} color="var(--color-german)"/>
           </>
+        ) : mostrarAbierto ? (
+          <>
+            <LineaInfo label={`Saldo cargado el ${fmtDate(new Date(periodoAbierto.fechaInicio+'T12:00:00'))}`} valor={periodoAbierto.saldoIni} color="var(--color-muted)"/>
+            <LineaInfo label="Transferido desde esa carga" valor={periodoAbierto.transferido} color="var(--color-tab-tarjetas)"/>
+            <LineaInfo label="Gastos Zapia via transferencia" valor={periodoAbierto.gastosZapia} color="var(--color-tab-gastos)"/>
+            <LineaInfo label="Saldo estimado a hoy" valor={periodoAbierto.saldoEstimado} color="var(--color-ink)"/>
+            <div className="px-4 py-2.5 text-[11px] text-accent-strong border-t border-border-soft bg-[#FFFBF5]">
+              ⏳ Todavía no cerró — el gasto hormiga se confirma cuando Julieta vuelva a cargar su saldo real.
+            </div>
+          </>
         ) : (
           <div className="px-4 py-3 text-[12px] text-muted-light border-t border-border-soft">
-            {filtro==='semana'
-              ? 'Julieta no cargó saldo este domingo todavía — el gasto hormiga se calcula recién cuando carga (se suma lo de esta semana con la próxima).'
-              : 'Todavía no hay dos cargas de saldo dentro de este mes para reconciliar.'}
+            {ultimaFecha
+              ? 'Todavía no hay una carga de saldo reciente para reconciliar.'
+              : 'Julieta todavía no cargó ningún saldo real — cargá el primero para empezar a trackear el gasto hormiga.'}
           </div>
         )}
 
