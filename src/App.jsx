@@ -148,8 +148,9 @@ export default function App() {
         })
       });
       const r = await res.json().catch(()=>({}));
-      setSyncStatus(r.status==='ok'||res.ok?'ok':'error');
-      if (r.status==='ok'||res.ok) setTimeout(()=>setSyncStatus('idle'),3000);
+      const ok = res.ok && r.status === 'ok';
+      setSyncStatus(ok ? 'ok' : 'error');
+      if (ok) setTimeout(()=>setSyncStatus('idle'),3000);
     } catch(e) { setSyncStatus('error'); }
     setSyncing(false);
   }, [scriptUrl]);

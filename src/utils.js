@@ -73,9 +73,35 @@ export const calcularIngresoGerman = (uberDiDi, mesKey, zapiaData, saldoJulieta)
   const cierreMes = (uberDiDi||[])
     .filter(r => r.fecha && r.fecha.slice(0,7) === mesKey && r.efectivoCierreMes > 0)
     .reduce((s,r) => s + r.efectivoCierreMes, 0);
+
+  // Si Julieta tiene un saldo cargado dentro del mes actual, ese saldo es el
+  // punto de partida REAL de Germán. Mientras el período siga abierto, se
+  // muestra ese saldo y se ajusta únicamente por movimientos posteriores:
+  // transferencias que ingresaron a Julieta y gastos de Julieta pagados por
+  // transferencia. El gasto hormiga NO se calcula todavía.
+  const hoyStr = hoy();
+  const fechas = Object.keys(saldoJulieta||{}).sort();
+  const ultimaFecha = fechas.length ? fechas[fechas.length - 1] : null;
+
+  if (ultimaFecha && ultimaFecha.slice(0,7) === mesKey) {
+    const saldoInicial = n(saldoJulieta[ultimaFecha]);
+    const transferido = (uberDiDi||[])
+      .filter(r => r.fecha && r.fecha > ultimaFecha && r.fecha <= hoyStr)
+      .reduce((s,r) => s + (r.transferencia||0), 0);
+    const gastosZapia = (zapiaData||[])
+      .filter(r => r.fecha && r.fecha > ultimaFecha && r.fecha <= hoyStr &&
+        r.quien === 'Julieta' && r.medio === 'transferencia')
+      .reduce((s,r) => s + (r.costo||0), 0);
+
+    return Math.max(0, saldoInicial + transferido - gastosZapia);
+  }
+
+  // Para períodos cerrados se mantiene la reconciliación histórica: el
+  // resultado se conoce recién cuando existe la siguiente carga de saldo.
   const reconciliado = calcularReconciliacionJulieta(saldoJulieta, uberDiDi, zapiaData)
     .filter(p => p.fechaFin.slice(0,7) === mesKey)
     .reduce((s,p) => s + p.ingresoGerman, 0);
+
   return reconciliado + cierreMes;
 };
 
