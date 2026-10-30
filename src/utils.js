@@ -129,17 +129,22 @@ export const calcularPeriodoAbierto = (saldoJulieta, uberDiDi, zapiaData, hoyStr
   };
 };
 
-// Ingreso de Germán en un mes = lo que juntó en la Uala: diferencia real de saldo
-// de los períodos cerrados cuyo cierre cae en el mes, más la estimación del período
-// abierto si es el mes en curso. Ya viene neto de los gastos de Julieta y del
-// depósito de fin de mes, por eso NO se resta ni se suma nada más.
+// Ingreso de Germán en Principal = el saldo de la Uala.
+// · Mes donde está la ÚLTIMA carga de saldo real de Julieta: ese saldo declarado ES el dato
+//   (no se le resta la diferencia de conciliación: es plata que ya se gastó sin registrar y el
+//   saldo declarado ya la refleja). Se le suman SOLO los movimientos posteriores a esa carga:
+//   transferencias + depósito de fin de mes − gastos de Julieta en Zapia (efectivo y transferencia).
+// · Meses anteriores ya cerrados: se mantiene la lógica histórica (suba del saldo entre cargas
+//   cuyo cierre cae en el mes). Pendiente de decidir si también deben mostrar el saldo declarado.
 export const calcularIngresoGerman = (uberDiDi, mesKey, zapiaData, saldoJulieta, hoyStr = hoy()) => {
-  const cerrados = calcularConciliaciones(saldoJulieta, uberDiDi, zapiaData)
+  const fechas = Object.keys(saldoJulieta||{}).sort();
+  const ultima = fechas.length ? fechas[fechas.length-1] : null;
+  if (ultima && ultima.slice(0,7) === mesKey) {
+    return calcularPeriodoAbierto(saldoJulieta, uberDiDi, zapiaData, hoyStr).saldoEstimado;
+  }
+  return calcularConciliaciones(saldoJulieta, uberDiDi, zapiaData)
     .filter(p => p.fechaFin.slice(0,7) === mesKey)
     .reduce((s,p) => s + p.ingresoGerman, 0);
-  const ab = calcularPeriodoAbierto(saldoJulieta, uberDiDi, zapiaData, hoyStr);
-  const abierto = ab && hoyStr.slice(0,7) === mesKey ? ab.ingresoEstimado : 0;
-  return cerrados + abierto;
 };
 
 // Conciliación del lado de Germán: su bruto se usa para sus gastos de Zapia, lo

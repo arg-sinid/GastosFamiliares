@@ -35,9 +35,9 @@ test('10. el gasto hormiga NO se descuenta otra vez del resultado mensual', () =
   const ctx = { monthly:{ '2026-10':{ ingresos:{julieta:'1000000'}, gastos:{alquiler:'200000'} } }, gastosRecurrentes:{}, totalesTarjetas:{},
     uberDiDi:ud, zapiaData:[ zap('2026-10-07','Julieta',10000) ], saldoJulieta:saldos, hoyStr:'2026-10-20' };
   const r = calcularResultadoMensual(ctx, '2026-10');
-  // ingreso Germán = delta real 30k (ya incluye la hormiga de -10k); resultado = 1.000.000 + 30.000 − 200.000
-  assert.equal(r.germanIncome, 30000);
-  assert.equal(r.saldo, 830000);
+  // ingreso Germán = saldo declarado (130k); la diferencia de -10k NO se resta otra vez
+  assert.equal(r.germanIncome, 130000);
+  assert.equal(r.saldo, 1000000 + 130000 - 200000);
 });
 
 test('gastos de Julieta incluyen efectivo y transferencia; los de Germán no entran a la Uala', () => {
@@ -53,7 +53,8 @@ test('depósito de fin de mes: cuenta una sola vez (en el esperado) y no se suma
   assert.equal(p.deposito, 20000);
   assert.equal(p.esperado, 160000);
   assert.equal(p.diferencia, 0);                      // antes del arreglo habría dado +20k de "sobrante"
-  assert.equal(calcularIngresoGerman(u, '2026-11', [], s, '2026-11-02'), 60000); // delta, sin sumar 20k de nuevo
+  assert.equal(calcularIngresoGerman(u, '2026-11', [], s, '2026-11-02'), 160000); // saldo declarado, sin sumar el depósito de nuevo
+  assert.equal(calcularIngresoGerman(u, '2026-10', [], s, '2026-11-02'), 0);       // octubre: ninguna carga cerró en el mes
 });
 
 test('11. los gastos se asignan al período correcto entre dos conciliaciones', () => {
@@ -64,13 +65,13 @@ test('11. los gastos se asignan al período correcto entre dos conciliaciones', 
   assert.equal(p2.gastosJulieta, 444);         // (11, 18]
 });
 
-test('ingreso de Germán: mes cerrado (delta real) y mes abierto (estimación) usan el mismo concepto', () => {
+test('ingreso de Germán: mes con la última carga = saldo declarado + movimientos posteriores', () => {
   const z = [ zap('2026-10-13','Julieta',5000) ];
   const u = [ uber('2026-10-11',{ transferencia:50000 }), uber('2026-10-18',{ transferencia:40000 }) ];
   // Con hoy=20/10 el período abierto (desde el 11) estima 40.000 − 5.000
   assert.equal(calcularPeriodoAbierto(saldos, u, z, '2026-10-20').ingresoEstimado, 35000);
-  // 11/10 cerró: delta 30k; abierto: 35k
-  assert.equal(calcularIngresoGerman(u, '2026-10', z, saldos, '2026-10-20'), 30000 + 35000);
+  // último saldo declarado 11/10 = 130k; después: +40k transferido −5k gastos
+  assert.equal(calcularIngresoGerman(u, '2026-10', z, saldos, '2026-10-20'), 130000 + 40000 - 5000);
   // Meses futuros: nada
   assert.equal(calcularIngresoGerman(u, '2026-12', z, saldos, '2026-10-20'), 0);
 });
@@ -85,7 +86,7 @@ test('7. sueldo de Julieta distinto en dos meses consecutivos', () => {
 test('6. el bruto Uber/DiDi no se suma al resultado familiar (solo lo juntado en Uala)', () => {
   const ctx = { monthly:{ '2026-10':{ ingresos:{julieta:'0'}, gastos:{} } }, gastosRecurrentes:{}, totalesTarjetas:{},
     uberDiDi:[ uber('2026-10-11',{ total:500000, transferencia:50000 }) ], zapiaData:[], saldoJulieta:saldos, hoyStr:'2026-10-11' };
-  assert.equal(calcularResultadoMensual(ctx,'2026-10').ing, 30000);
+  assert.equal(calcularResultadoMensual(ctx,'2026-10').ing, 130000);   // saldo declarado, no el bruto de 500k
 });
 
 test('conciliación de Germán: la diferencia sale de su bruto', () => {
@@ -158,7 +159,7 @@ test('control: la fila de la hoja sale de las mismas funciones que la pantalla',
   assert.equal(fila.length, 15);
   assert.equal(fila[13], r.saldo);
   assert.equal(fila[4], 50000);                 // la tarjeta calculada pisa lo manual
-  assert.equal(fila[3], 1030000);
+  assert.equal(fila[3], 1130000);
 });
 
 test('ahorro manual: ingresos suman y retiros restan', () => {
@@ -173,4 +174,17 @@ test('ahorro acumulado no suma meses con saldo negativo', () => {
   const ctx = { monthly:{ '2026-08':{ ingresos:{julieta:'100'}, gastos:{ alquiler:'300' } }, '2026-09':{ ingresos:{julieta:'500'}, gastos:{ alquiler:'100' } } },
     gastosRecurrentes:{}, totalesTarjetas:{}, uberDiDi:[], zapiaData:[], saldoJulieta:{}, hoyStr:'2026-10-01' };
   assert.equal(calcularAhorroAcumulado(ctx, '2026-12'), 400);
+});
+
+test('caso real: saldo declarado 600.000 el domingo 25/10 → Principal muestra 600.000 aunque haya diferencia de conciliación', () => {
+  const s = { '2026-09-27':425000, '2026-10-18':520000, '2026-10-25':600000 };
+  const u = [ uber('2026-10-25',{ transferencia:150000 }) ];
+  const z = [ zap('2026-10-20','Julieta',30000) ];     // esperado 520+150−30 = 640k ⇒ diferencia −40k (hormiga)
+  const [, p] = calcularConciliaciones(s, u, z);
+  assert.equal(p.diferencia, -40000);
+  assert.equal(calcularIngresoGerman(u, '2026-10', z, s, '2026-10-26'), 600000);
+  // después del domingo: se suman solo los movimientos nuevos
+  const u2 = [...u, uber('2026-10-26',{ transferencia:10000 })];
+  const z2 = [...z, zap('2026-10-27','Julieta',4000,'efectivo')];
+  assert.equal(calcularIngresoGerman(u2, '2026-10', z2, s, '2026-10-28'), 600000 + 10000 - 4000);
 });

@@ -245,8 +245,8 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
             </div>
             <div className="flex justify-between items-center px-4 py-2.5 bg-positive-soft border-t border-[#E6FFFA]">
               <div>
-                <div className="text-[13px] text-positive font-semibold">👨 Germán · lo que juntó en Uala (automático)</div>
-                <div className="text-[11px] text-muted-light">Diferencia de saldo real de la Uala. Ya está neto de los gastos de Julieta y del depósito de fin de mes.</div>
+                <div className="text-[13px] text-positive font-semibold">👨 Germán · saldo de la Uala (automático)</div>
+                <div className="text-[11px] text-muted-light">Último saldo real que declaró Julieta + lo transferido/depositado y − lo gastado desde esa carga. La diferencia de conciliación no se resta.</div>
               </div>
               <span className="text-base font-extrabold text-positive tabular-nums">{germanIncome!==0?$$(germanIncome):'—'}</span>
             </div>
