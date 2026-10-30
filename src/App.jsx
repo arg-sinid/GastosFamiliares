@@ -1,28 +1,25 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { storage } from './storage.js';
-import { calcularTotalesTarjetas } from './utils.js';
+import {
+  calcularTotalesTarjetas, calcularFilasControl, dedupePorId, EMPTY_DATA, setOcultarMontos, hoy,
+} from './utils.js';
+import { SyncEngine } from './sync.js';
 import { SkeletonHero, SkeletonRow } from './components/ui.jsx';
 import ControlGastos from './apps/ControlGastos.jsx';
-import Control       from './apps/Control.jsx';
 import Gastos        from './apps/Gastos.jsx';
-import UberDiDi      from './apps/UberDiDi.jsx';
-import Tarjetas      from './apps/Tarjetas.jsx';
-import CierreReal    from './apps/CierreReal.jsx';
+import Auto          from './apps/Auto.jsx';
 
 const SK_URL     = 'script_url_v1';
 const SK_USUARIO = 'usuario_v1';
 const SK_META    = 'meta_ahorro_v1';
-const EMPTY_DATA = () => ({
-  monthly:{}, categories:{}, uberDiDi:[],
-  gastosRecurrentes:{}, saldoJulieta:{}, dolarTarjeta:{}, ahorroMovimientos:[]
-});
+const SK_OCULTAR = 'ocultar_montos_v1';
 
 function isLastTuesdayOfMonth() {
-  const hoy = new Date();
-  if (hoy.getDay() !== 2) return false;
-  const proxSemana = new Date(hoy);
-  proxSemana.setDate(hoy.getDate() + 7);
-  return proxSemana.getMonth() !== hoy.getMonth();
+  const hoyD = new Date();
+  if (hoyD.getDay() !== 2) return false;
+  const proxSemana = new Date(hoyD);
+  proxSemana.setDate(hoyD.getDate() + 7);
+  return proxSemana.getMonth() !== hoyD.getMonth();
 }
 
 function SettingsModal({ scriptUrl, usuario, metaAhorro, onSave, onClose }) {
@@ -69,106 +66,163 @@ function SettingsModal({ scriptUrl, usuario, metaAhorro, onSave, onClose }) {
   );
 }
 
+const leerJson = async (res) => { try { return await res.json(); } catch { return { status:'error', msg:'Respuesta inválida del servidor' }; } };
+
 export default function App() {
   const [activeApp,    setActiveApp]    = useState('principal');
   const [scriptUrl,    setScriptUrl]    = useState(()=>storage.get(SK_URL)?.value     || '');
   const [usuario,      setUsuario]      = useState(()=>storage.get(SK_USUARIO)?.value || 'german');
   const [metaAhorro,   setMetaAhorro]   = useState(()=>storage.get(SK_META)?.value    || '');
+  const [ocultar,      setOcultar]      = useState(()=>storage.get(SK_OCULTAR)?.value === '1');
   const [appData,      setAppData]      = useState(EMPTY_DATA());
   const [zapiaData,    setZapiaData]    = useState([]);
   const [tarjetasData, setTarjetasData] = useState([]);
   const [tarjetasLoading, setTarjetasLoading] = useState(true);
   const [loading,      setLoading]      = useState(true);
+  const [loadedOk,     setLoadedOk]     = useState(false);
+  const [loadError,    setLoadError]    = useState('');
   const [syncing,      setSyncing]      = useState(false);
   const [syncStatus,   setSyncStatus]   = useState('idle');
+  const [syncMsg,      setSyncMsg]      = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
+  // Todos los importes de la app respetan este interruptor (ver utils.$$).
+  setOcultarMontos(ocultar);
+  const toggleOcultar = () => setOcultar(v => { storage.set(SK_OCULTAR, v ? '0' : '1'); return !v; });
+
   const showBanner = isLastTuesdayOfMonth() && !bannerDismissed;
 
-  const loadData = useCallback(async (url) => {
-    if (!url) { setLoading(false); setTarjetasLoading(false); return; }
-    try {
-      const [r1, r2, r3] = await Promise.all([
-        fetch(`${url}?tipo=appdata`), fetch(`${url}?tipo=zapia`), fetch(`${url}?tipo=tarjetas`)
-      ]);
-      const [d1, d2, d3] = await Promise.all([r1.json(), r2.json(), r3.json()]);
-      if (d1.status==='ok' && d1.data) {
-        setAppData({
-          monthly:           d1.data.monthly           || {},
-          categories:        d1.data.categories        || {},
-          uberDiDi:          d1.data.uberDiDi          || [],
-          gastosRecurrentes: d1.data.gastosRecurrentes  || {},
-          saldoJulieta:      d1.data.saldoJulieta       || {},
-          dolarTarjeta:      d1.data.dolarTarjeta       || {},
-          ahorroMovimientos: d1.data.ahorroMovimientos  || [],
+  // Refs para que el motor de sincronización use siempre lo último sin recrearse.
+  const urlRef = useRef(scriptUrl);      urlRef.current = scriptUrl;
+  const zapiaRef = useRef(zapiaData);    zapiaRef.current = zapiaData;
+  const tarjetasRef = useRef(tarjetasData); tarjetasRef.current = tarjetasData;
+  const loadedRef = useRef(false);       loadedRef.current = loadedOk;
+
+  const engineRef = useRef(null);
+  if (!engineRef.current) {
+    engineRef.current = new SyncEngine({
+      store: storage,
+      post: async ({ baseVersion, data, extra }) => {
+        const res = await fetch(urlRef.current, {
+          method:'POST', headers:{'Content-Type':'text/plain'},
+          body: JSON.stringify({ baseVersion, data, ...extra }),
         });
-      }
+        return leerJson(res);
+      },
+      // Las filas de la hoja "Control 2026" se calculan ACÁ con las mismas funciones
+      // que usa la pantalla; el servidor no recalcula nada.
+      buildExtra: (data) => {
+        const totalesTarjetas = calcularTotalesTarjetas(tarjetasRef.current, data.dolarTarjeta);
+        const ctx = { monthly:data.monthly, gastosRecurrentes:data.gastosRecurrentes, totalesTarjetas,
+          uberDiDi:data.uberDiDi, zapiaData:zapiaRef.current, saldoJulieta:data.saldoJulieta, hoyStr:hoy() };
+        return { filasControl: calcularFilasControl(ctx, new Date().toLocaleString('es-AR')) };
+      },
+      onStatus: (s, msg) => {
+        setSyncing(s === 'syncing');
+        if (s === 'ok') { setSyncStatus('ok'); setSyncMsg(''); setTimeout(()=>setSyncStatus(p => p === 'ok' ? 'idle' : p), 3000); }
+        else if (s === 'error') { setSyncStatus('error'); setSyncMsg(msg || ''); }
+        else setSyncStatus('idle');
+      },
+      onData: (d) => setAppData(d),
+    });
+  }
+  const engine = engineRef.current;
+
+  const cargarExternos = useCallback(async (url) => {
+    try {
+      const [r2, r3] = await Promise.all([ fetch(`${url}?tipo=zapia`), fetch(`${url}?tipo=tarjetas`) ]);
+      const [d2, d3] = await Promise.all([ leerJson(r2), leerJson(r3) ]);
       if (d2.status==='ok' && d2.data) setZapiaData(d2.data);
-      if (d3.status==='ok' && d3.data) setTarjetasData(d3.data);
-    } catch(e) { console.error('Error cargando:', e); }
-    setLoading(false); setTarjetasLoading(false);
+      if (d3.status==='ok' && d3.data) setTarjetasData(dedupePorId(d3.data));
+    } catch(e) { console.error('Error cargando datos externos:', e); }
+    setTarjetasLoading(false);
   }, []);
+
+  // Carga inicial (o al cambiar la URL): lee el estado del servidor UNA vez.
+  const cargarTodo = useCallback(async (url) => {
+    if (!url) { setLoading(false); setTarjetasLoading(false); return; }
+    setLoadError('');
+    try {
+      const d1 = await leerJson(await fetch(`${url}?tipo=appdata`));
+      if (d1.status !== 'ok' || !d1.data) throw new Error(d1.msg || 'No se pudieron leer los datos.');
+      if (typeof d1.version !== 'number') throw new Error('El Apps Script todavía no está actualizado a la versión 6.');
+      setAppData(engine.init({ version:d1.version, data:d1.data }));
+      setLoadedOk(true);
+      await cargarExternos(url);
+      if (engine.hayPendiente) engine.flush();       // cambios que habían quedado sin enviar
+    } catch(e) {
+      setLoadError(String(e.message || e));
+      setTarjetasLoading(false);
+    }
+    setLoading(false);
+  }, [cargarExternos]);
 
   const reloadTarjetas = useCallback(async () => {
     if (!scriptUrl) return;
     setTarjetasLoading(true);
-    try {
-      const res = await fetch(`${scriptUrl}?tipo=tarjetas`);
-      const data = await res.json();
-      if (data.status==='ok') setTarjetasData(data.data || []);
-    } catch(e) { console.error('Error recargando tarjetas:', e); }
-    setTarjetasLoading(false);
-  }, [scriptUrl]);
+    await cargarExternos(scriptUrl);
+  }, [scriptUrl, cargarExternos]);
 
+  useEffect(() => { cargarTodo(scriptUrl); }, [scriptUrl]);
+
+  // Al volver a la app: NO se reemplaza el estado a ciegas. Si hay cambios sin
+  // enviar se reintenta el envío; si no, se consulta la versión y solo se adopta
+  // el estado del servidor cuando cambió.
   useEffect(() => {
-    loadData(scriptUrl);
-    const onVisible = () => { if (!document.hidden && scriptUrl) loadData(scriptUrl); };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [scriptUrl]);
+    const alVolver = async () => {
+      const url = urlRef.current;
+      if (document.hidden || !url || !loadedRef.current) return;
+      if (engine.hayPendiente) { engine.flush(); return; }
+      try {
+        const v = await leerJson(await fetch(`${url}?tipo=version`));
+        if (v.status === 'ok' && v.version !== engine.version) {
+          const s = await leerJson(await fetch(`${url}?tipo=appdata`));
+          if (s.status === 'ok' && s.data) engine.adoptarServidor({ version:s.version, data:s.data });
+        }
+      } catch {}
+      cargarExternos(url);
+    };
+    const alConectar = () => { if (engine.hayPendiente) engine.flush(); };
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('online', alConectar);
+    return () => { document.removeEventListener('visibilitychange', alVolver); window.removeEventListener('online', alConectar); };
+  }, [cargarExternos]);
 
+  // Guardado: se aplica en pantalla, se persiste en el dispositivo y recién se
+  // informa "sincronizado" cuando el servidor lo confirmó. Devuelve true/false.
   const saveData = useCallback(async (newData) => {
-    if (!scriptUrl) { setShowSettings(true); return; }
-    setSyncing(true); setSyncStatus('idle');
+    if (!urlRef.current) { setShowSettings(true); return false; }
+    if (!loadedRef.current) {
+      setSyncStatus('error'); setSyncMsg('Los datos no se cargaron: no se guarda nada para no pisar lo que hay en la nube.');
+      return false;
+    }
     setAppData(newData);
-    const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, newData.dolarTarjeta);
-    try {
-      const res = await fetch(scriptUrl, {
-        method: 'POST', headers: {'Content-Type':'text/plain'},
-        body: JSON.stringify({
-          allData:           newData.monthly,
-          categories:        newData.categories,
-          uberDiDi:          newData.uberDiDi,
-          gastosRecurrentes: newData.gastosRecurrentes,
-          saldoJulieta:      newData.saldoJulieta,
-          dolarTarjeta:      newData.dolarTarjeta,
-          ahorroMovimientos: newData.ahorroMovimientos,
-          totalesTarjetas,
-        })
-      });
-      const r = await res.json().catch(()=>({}));
-      const ok = res.ok && r.status === 'ok';
-      setSyncStatus(ok ? 'ok' : 'error');
-      if (ok) setTimeout(()=>setSyncStatus('idle'),3000);
-    } catch(e) { setSyncStatus('error'); }
-    setSyncing(false);
-  }, [scriptUrl]);
+    const r = await engine.save(newData);
+    return r.ok;
+  }, []);
+
+  const retry = () => engine.flush();
 
   const saveSettings = (url, usr, meta) => {
-    setScriptUrl(url); setUsuario(usr); setMetaAhorro(meta);
+    setUsuario(usr); setMetaAhorro(meta);
     storage.set(SK_URL, url); storage.set(SK_USUARIO, usr); storage.set(SK_META, meta);
-    setShowSettings(false); setLoading(true); loadData(url);
+    setShowSettings(false);
+    if (url !== scriptUrl) { setScriptUrl(url); setLoadedOk(false); setLoading(true); }
   };
 
-  if (loading) {
-    if (!scriptUrl) return (
-      <div className="flex flex-col items-center justify-center h-screen text-muted gap-4 bg-paper">
+  if (loading || (!loadedOk && scriptUrl)) {
+    if (!scriptUrl || (!loading && loadError)) return (
+      <div className="flex flex-col items-center justify-center h-screen text-muted gap-4 bg-paper px-6 text-center">
         {showSettings && <SettingsModal scriptUrl={scriptUrl} usuario={usuario} metaAhorro={metaAhorro} onSave={saveSettings} onClose={()=>setShowSettings(false)}/>}
-        <div className="text-5xl">💰</div>
-        <div className="text-sm">Configurá el Apps Script para empezar</div>
-        <button onClick={()=>setShowSettings(true)}
-          className="px-6 py-3 border-none rounded-xl bg-ink text-white font-bold text-sm cursor-pointer touch-manipulation">⚙️ Configurar</button>
+        <div className="text-5xl">{loadError ? '⚠️' : '💰'}</div>
+        <div className="text-sm">{loadError || 'Configurá el Apps Script para empezar'}</div>
+        <div className="flex gap-2">
+          {loadError && <button onClick={()=>{ setLoading(true); cargarTodo(scriptUrl); }}
+            className="px-5 py-3 border-none rounded-xl bg-tab-tarjetas text-white font-bold text-sm cursor-pointer touch-manipulation">Reintentar</button>}
+          <button onClick={()=>setShowSettings(true)}
+            className="px-5 py-3 border-none rounded-xl bg-ink text-white font-bold text-sm cursor-pointer touch-manipulation">⚙️ Configurar</button>
+        </div>
       </div>
     );
     return (
@@ -185,16 +239,16 @@ export default function App() {
     );
   }
 
+  // 3 accesos principales. Control, Historial, Ahorros y Cierre viven dentro de Principal;
+  // Tarjetas dentro de Gastos; Ganancias y gastos del vehículo dentro de Auto.
   const NAV = [
-    { key:'principal', emoji:'💰', label:'Principal',   colorVar:'--color-tab-principal' },
-    { key:'control',   emoji:'📊', label:'Control',     colorVar:'--color-tab-control' },
-    { key:'gastos',    emoji:'🏷️', label:'Gastos',      colorVar:'--color-tab-gastos' },
-    { key:'tarjetas',  emoji:'💳', label:'Tarjetas',    colorVar:'--color-tab-tarjetas' },
-    { key:'ganancias', emoji:'🚗', label:'Ganancias',   colorVar:'--color-tab-ganancias' },
-    { key:'cierre',    emoji:'🧮', label:'Cierre Real', colorVar:'--color-tab-cierre' },
+    { key:'principal', emoji:'💰', label:'Principal', colorVar:'--color-tab-principal' },
+    { key:'gastos',    emoji:'🏷️', label:'Gastos',    colorVar:'--color-tab-gastos' },
+    { key:'auto',      emoji:'🚗', label:'Auto',      colorVar:'--color-tab-ganancias' },
   ];
 
-  const commonProps = { appData, saveData, zapiaData, syncing, syncStatus, usuario, onRefresh:()=>loadData(scriptUrl) };
+  const onRefresh = () => cargarExternos(scriptUrl);
+  const commonProps = { appData, saveData, zapiaData, tarjetasData, syncing, syncStatus, usuario, onRefresh, ocultar, onToggleOcultar:toggleOcultar };
 
   return (
     <div className="font-sans bg-paper min-h-screen pb-[70px]">
@@ -213,18 +267,13 @@ export default function App() {
       )}
 
       <div className={activeApp==='principal'?'block':'hidden'}>
-        <ControlGastos {...commonProps} metaAhorro={metaAhorro} tarjetasData={tarjetasData}
-          onForceSync={()=>loadData(scriptUrl)} onOpenSettings={()=>setShowSettings(true)}/>
+        <ControlGastos {...commonProps} metaAhorro={metaAhorro} syncMsg={syncMsg}
+          onRetry={retry} onOpenSettings={()=>setShowSettings(true)}/>
       </div>
-      <div className={activeApp==='control'?'block':'hidden'}><Control {...commonProps}/></div>
-      <div className={activeApp==='gastos'?'block':'hidden'}><Gastos {...commonProps} movimientos={tarjetasData} loading={false}/></div>
-      <div className={activeApp==='tarjetas'?'block':'hidden'}>
-        <Tarjetas appData={appData} saveData={saveData} movimientos={tarjetasData} loading={tarjetasLoading} onRefresh={reloadTarjetas}/>
+      <div className={activeApp==='gastos'?'block':'hidden'}>
+        <Gastos {...commonProps} loadingTarjetas={tarjetasLoading} onRefreshTarjetas={reloadTarjetas}/>
       </div>
-      <div className={activeApp==='ganancias'?'block':'hidden'}><UberDiDi {...commonProps}/></div>
-      <div className={activeApp==='cierre'?'block':'hidden'}>
-        <CierreReal appData={appData} zapiaData={zapiaData} tarjetasData={tarjetasData} onRefresh={()=>loadData(scriptUrl)}/>
-      </div>
+      <div className={activeApp==='auto'?'block':'hidden'}><Auto {...commonProps}/></div>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-border flex shadow-[0_-2px_12px_rgba(0,0,0,0.08)] z-[100]"
            style={{ paddingBottom:'env(safe-area-inset-bottom)' }}>
@@ -238,7 +287,7 @@ export default function App() {
                 borderTop: `2.5px solid ${isActive ? `var(${a.colorVar})` : 'transparent'}`,
               }}>
               <span className="text-lg">{a.emoji}</span>
-              <span className={`text-[8px] tracking-wide ${isActive?'font-bold':'font-medium'}`}>{a.label}</span>
+              <span className={`text-[10px] tracking-wide ${isActive?'font-bold':'font-medium'}`}>{a.label}</span>
             </button>
           );
         })}

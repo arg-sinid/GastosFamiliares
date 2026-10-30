@@ -1,32 +1,37 @@
-import { categorizarUno, categorizarMovimientoTarjeta } from './categorias.js';
+import { categorizarItem, GRUPOS_AUTO } from './categorias.js';
 
 export const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 export const n=v=>parseFloat(String(v??'').replace(',','.'))||0;
-export const $$=v=>{if(v===''||v===null||v===undefined||isNaN(v))return'—';return new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(v);};
-export const getKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+
+// ── Ocultar importes ─────────────────────────────────────────────────
+// Un solo interruptor: todo lo que pasa por $$ / fmtK respeta el estado.
+let ocultarMontos = false;
+export const setOcultarMontos = v => { ocultarMontos = !!v; };
+export const getOcultarMontos = () => ocultarMontos;
+const fmtARS = new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0});
+export const $$=v=>{
+  if(v===''||v===null||v===undefined||isNaN(v))return'—';
+  return ocultarMontos ? '$ ••••' : fmtARS.format(v);
+};
+export const fmtK = v => ocultarMontos ? '' : `$${Math.round(v/1000)}K`;
+
+// ── Fechas ───────────────────────────────────────────────────────────
+const pad = x => String(x).padStart(2,'0');
+export const getKey=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}`;
 export const fmtKey=k=>{const[y,m]=k.split('-');return`${MESES[parseInt(m)-1]} ${y}`;};
-export const dateStr=d=>d.toISOString().split('T')[0];
+// Fecha local (no UTC): evita que después de las 21 h se guarde "mañana".
+export const dateStr=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 export const monthOf=ds=>ds.slice(0,7);
 export const getMonday=d=>{const dt=new Date(d),day=dt.getDay();dt.setDate(dt.getDate()-day+(day===0?-6:1));dt.setHours(0,0,0,0);return dt;};
 export const weekDates=mon=>Array.from({length:7},(_,i)=>{const d=new Date(mon);d.setDate(d.getDate()+i);return d;});
-export const fmtDate=d=>`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
-export const uid=()=>Math.random().toString(36).slice(2,9);
-export const hoy=()=>new Date().toISOString().split('T')[0];
+export const fmtDate=d=>`${pad(d.getDate())}/${pad(d.getMonth()+1)}`;
+export const uid=()=>Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
+// Hoy en Buenos Aires (misma zona que usa el backend).
+const fmtBA = new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Buenos_Aires',year:'numeric',month:'2-digit',day:'2-digit'});
+export const hoy=(now=new Date())=>fmtBA.format(now);
 export const monthOpts=today=>{const o=[];for(let i=-4;i<=8;i++){const d=new Date(today.getFullYear(),today.getMonth()+i,1);o.push(getKey(d));}return o;};
 
-// Los últimos N meses (incluyendo mesKey), en orden cronológico — usado
-// para armar el gráfico de tendencia de una categoría.
-export const ultimosMeses = (mesKey, cantidad=6) => {
-  const [y,m] = mesKey.split('-').map(Number);
-  const out = [];
-  for (let i = cantidad-1; i >= 0; i--) {
-    const d = new Date(y, m-1-i, 1);
-    out.push(getKey(d));
-  }
-  return out;
-};
-
-// ¿La fecha dada (string YYYY-MM-DD) es el último día de su mes?
+// ¿La fecha dada (YYYY-MM-DD) es el último día de su mes?
 export const esUltimoDiaMes = (fechaStr) => {
   if (!fechaStr) return false;
   const d = new Date(fechaStr + 'T12:00:00');
@@ -34,163 +39,261 @@ export const esUltimoDiaMes = (fechaStr) => {
   return next.getMonth() !== d.getMonth();
 };
 
-// Reconstruye los períodos entre cargas CONSECUTIVAS del saldo real de
-// Julieta. Cada período cierra en la fecha de una carga real; el anterior
-// (o el primero, si no hay uno previo) queda sin período — no hay saldo de
-// referencia contra el cual comparar. Si Julieta se salteó semanas, el
-// período simplemente se estira hasta la próxima carga real: todo lo
-// transferido y gastado en el medio se reconcilia junto, de una.
-//   ingresoGerman = diferencia real de saldo (S1 − S0), nunca negativo
-//   gastoHormiga  = lo transferido y no gastado (registrado) ni tampoco
-//                   presente en el saldo final — la plata que se evaporó
-export const calcularReconciliacionJulieta = (saldoJulieta, uberDiDi, zapiaData) => {
+// Meses (YYYY-MM) hacia atrás desde mesKey, incluyendo mesKey, en orden cronológico.
+export const mesesAtras = (mesKey, cantidad) => {
+  const [y,m] = mesKey.split('-').map(Number);
+  return Array.from({length:cantidad},(_,i)=>getKey(new Date(y, m-1-(cantidad-1-i), 1)));
+};
+
+// ── Datos ────────────────────────────────────────────────────────────
+export const EMPTY_DATA = () => ({
+  monthly:{}, categories:{}, uberDiDi:[], gastosRecurrentes:{},
+  saldoJulieta:{}, dolarTarjeta:{}, ahorroMovimientos:[], autoDetalle:{},
+});
+export const normalizarAppData = (d) => {
+  const e = EMPTY_DATA(), x = d || {};
+  return {
+    monthly: x.monthly||e.monthly, categories: x.categories||e.categories, uberDiDi: x.uberDiDi||e.uberDiDi,
+    gastosRecurrentes: x.gastosRecurrentes||e.gastosRecurrentes, saldoJulieta: x.saldoJulieta||e.saldoJulieta,
+    dolarTarjeta: x.dolarTarjeta||e.dolarTarjeta, ahorroMovimientos: x.ahorroMovimientos||e.ahorroMovimientos,
+    autoDetalle: x.autoDetalle||e.autoDetalle,
+  };
+};
+
+// Los movimientos de tarjeta se identifican por id_unico. Dos filas con el mismo
+// id son el mismo movimiento (p. ej. el mismo PDF importado dos veces). Las filas
+// SIN id nunca se descartan: coincidir en fecha/importe no prueba duplicado.
+export const dedupePorId = (movs) => {
+  const vistos = new Set();
+  return (movs||[]).filter(m => {
+    if (!m.id) return true;
+    if (vistos.has(m.id)) return false;
+    vistos.add(m.id); return true;
+  });
+};
+
+// ── Conciliación de la cuenta Uala de Julieta ───────────────────────
+// Modelo: Germán gira los domingos lo que le sobra del bruto a la Uala (y el
+// último día del mes deposita efectivo). De esa cuenta salen los gastos de
+// Julieta cargados en Zapia (efectivo y transferencia). Julieta declara el saldo
+// real; la diferencia contra el esperado es la diferencia de conciliación
+// (negativa = gasto hormiga, positiva = sobrante).
+export const aportesAUala = (uberDiDi, desde, hasta) => {
+  let transferencias = 0, deposito = 0;
+  (uberDiDi||[]).forEach(r => {
+    if (!r.fecha || !(r.fecha > desde && r.fecha <= hasta)) return;
+    transferencias += n(r.transferencia); deposito += n(r.efectivoCierreMes);
+  });
+  return { transferencias, deposito, total: transferencias + deposito };
+};
+export const gastosZapiaDe = (zapiaData, quien, desde, hasta) =>
+  (zapiaData||[]).filter(r => r.fecha && r.fecha > desde && r.fecha <= hasta && r.quien === quien)
+                 .reduce((s,r) => s + n(r.costo), 0);
+
+export const conciliarUala = ({ saldoIni, saldoReal, aportes, gastos }) => {
+  const esperado = saldoIni + aportes - gastos;
+  return { esperado, diferencia: saldoReal - esperado, ingresoGerman: saldoReal - saldoIni };
+};
+
+// Períodos CERRADOS: entre cargas consecutivas de saldo real. Cada saldo
+// declarado es el punto de partida del siguiente período (se procesa una vez).
+export const calcularConciliaciones = (saldoJulieta, uberDiDi, zapiaData) => {
   const fechas = Object.keys(saldoJulieta||{}).sort();
   const periodos = [];
   for (let i = 1; i < fechas.length; i++) {
     const fIni = fechas[i-1], fFin = fechas[i];
-    const saldoIni = n(saldoJulieta[fIni]), saldoFin = n(saldoJulieta[fFin]);
-    const transferido = (uberDiDi||[])
-      .filter(r => r.fecha && r.fecha > fIni && r.fecha <= fFin)
-      .reduce((s,r) => s + (r.transferencia||0), 0);
-    const gastosZapia = (zapiaData||[])
-      .filter(r => r.fecha && r.fecha > fIni && r.fecha <= fFin && r.quien === 'Julieta' && r.medio === 'transferencia')
-      .reduce((s,r) => s + r.costo, 0);
-    const delta = saldoFin - saldoIni;
+    const saldoIni = n(saldoJulieta[fIni]), saldoReal = n(saldoJulieta[fFin]);
+    const ap = aportesAUala(uberDiDi, fIni, fFin);
+    const gastos = gastosZapiaDe(zapiaData, 'Julieta', fIni, fFin);
     periodos.push({
-      fechaInicio: fIni, fechaFin: fFin, saldoIni, saldoFin, transferido, gastosZapia,
-      ingresoGerman: Math.max(0, delta),
-      gastoHormiga:  Math.max(0, transferido - gastosZapia - delta),
+      fechaInicio: fIni, fechaFin: fFin, saldoIni, saldoReal,
+      transferido: ap.transferencias, deposito: ap.deposito, gastosJulieta: gastos,
+      ...conciliarUala({ saldoIni, saldoReal, aportes: ap.total, gastos }),
     });
   }
   return periodos;
 };
 
-// Ingreso de Germán en un mes: la parte que se reconcilia por la diferencia
-// real de saldo de Julieta (ver arriba) + el efectivo depositado al cierre
-// del mes. Un período se atribuye al mes de su fecha de CIERRE (cuando
-// Julieta reporta el saldo y recién ahí se sabe cuánto quedó realmente).
-export const calcularIngresoGerman = (uberDiDi, mesKey, zapiaData, saldoJulieta) => {
-  const cierreMes = (uberDiDi||[])
-    .filter(r => r.fecha && r.fecha.slice(0,7) === mesKey && r.efectivoCierreMes > 0)
-    .reduce((s,r) => s + r.efectivoCierreMes, 0);
-
-  // Si Julieta tiene un saldo cargado dentro del mes actual, ese saldo es el
-  // punto de partida REAL de Germán. Mientras el período siga abierto, se
-  // muestra ese saldo y se ajusta únicamente por movimientos posteriores:
-  // transferencias que ingresaron a Julieta y gastos de Julieta pagados por
-  // transferencia. El gasto hormiga NO se calcula todavía.
-  const hoyStr = hoy();
+// Período ABIERTO: desde el último saldo real hasta hoy. Es una estimación
+// (no hay saldo real todavía, por eso no hay diferencia de conciliación).
+export const calcularPeriodoAbierto = (saldoJulieta, uberDiDi, zapiaData, hoyStr = hoy()) => {
   const fechas = Object.keys(saldoJulieta||{}).sort();
-  const ultimaFecha = fechas.length ? fechas[fechas.length - 1] : null;
-
-  if (ultimaFecha && ultimaFecha.slice(0,7) === mesKey) {
-    const saldoInicial = n(saldoJulieta[ultimaFecha]);
-    const transferido = (uberDiDi||[])
-      .filter(r => r.fecha && r.fecha > ultimaFecha && r.fecha <= hoyStr)
-      .reduce((s,r) => s + (r.transferencia||0), 0);
-    const gastosZapia = (zapiaData||[])
-      .filter(r => r.fecha && r.fecha > ultimaFecha && r.fecha <= hoyStr &&
-        r.quien === 'Julieta' && r.medio === 'transferencia')
-      .reduce((s,r) => s + (r.costo||0), 0);
-
-    return Math.max(0, saldoInicial + transferido - gastosZapia);
-  }
-
-  // Para períodos cerrados se mantiene la reconciliación histórica: el
-  // resultado se conoce recién cuando existe la siguiente carga de saldo.
-  const reconciliado = calcularReconciliacionJulieta(saldoJulieta, uberDiDi, zapiaData)
-    .filter(p => p.fechaFin.slice(0,7) === mesKey)
-    .reduce((s,p) => s + p.ingresoGerman, 0);
-
-  return reconciliado + cierreMes;
+  const ultima = fechas.length ? fechas[fechas.length-1] : null;
+  if (!ultima) return null;
+  const saldoIni = n(saldoJulieta[ultima]);
+  const ap = aportesAUala(uberDiDi, ultima, hoyStr);
+  const gastos = gastosZapiaDe(zapiaData, 'Julieta', ultima, hoyStr);
+  return {
+    fechaInicio: ultima, saldoIni, transferido: ap.transferencias, deposito: ap.deposito,
+    gastosJulieta: gastos, saldoEstimado: saldoIni + ap.total - gastos, ingresoEstimado: ap.total - gastos,
+  };
 };
 
-// Calcula el total de cada tarjeta por mes a partir de los movimientos cargados por Zapia
+// Ingreso de Germán en un mes = lo que juntó en la Uala: diferencia real de saldo
+// de los períodos cerrados cuyo cierre cae en el mes, más la estimación del período
+// abierto si es el mes en curso. Ya viene neto de los gastos de Julieta y del
+// depósito de fin de mes, por eso NO se resta ni se suma nada más.
+export const calcularIngresoGerman = (uberDiDi, mesKey, zapiaData, saldoJulieta, hoyStr = hoy()) => {
+  const cerrados = calcularConciliaciones(saldoJulieta, uberDiDi, zapiaData)
+    .filter(p => p.fechaFin.slice(0,7) === mesKey)
+    .reduce((s,p) => s + p.ingresoGerman, 0);
+  const ab = calcularPeriodoAbierto(saldoJulieta, uberDiDi, zapiaData, hoyStr);
+  const abierto = ab && hoyStr.slice(0,7) === mesKey ? ab.ingresoEstimado : 0;
+  return cerrados + abierto;
+};
+
+// Conciliación del lado de Germán: su bruto se usa para sus gastos de Zapia, lo
+// transferido/depositado a Uala y el efectivo que le queda. Lo que no cierra es
+// diferencia (negativa = salida sin registrar / gasto hormiga).
+export const conciliarGerman = ({ bruto, gastos, aportes, efectivo }) => ({
+  usos: gastos + aportes + efectivo,
+  diferencia: (gastos + aportes + efectivo) - bruto,
+});
+
+// ── Tarjetas ─────────────────────────────────────────────────────────
+export const montoEnPesos = (m, dolar) => m.moneda === 'USD' ? m.importe * dolar : m.importe;
+
 export const calcularTotalesTarjetas = (movimientos, dolarTarjetaMap) => {
   const out = {};
   (movimientos||[]).forEach(m => {
     if (!m.mes || !m.tarjeta) return;
-    const key = m.tarjeta.toLowerCase() === 'icbc' ? 'icbc' : m.tarjeta.toLowerCase() === 'bna' ? 'bna' : null;
+    const t = m.tarjeta.toLowerCase();
+    const key = t === 'icbc' ? 'icbc' : t === 'bna' ? 'bna' : null;
     if (!key) return;
     const dolar = n(dolarTarjetaMap?.[m.mes]) || 0;
-    const monto = m.moneda === 'USD' ? m.importe * dolar : m.importe;
     if (!out[m.mes]) out[m.mes] = {};
-    out[m.mes][key] = (out[m.mes][key] || 0) + monto;
+    out[m.mes][key] = (out[m.mes][key] || 0) + montoEnPesos(m, dolar);
   });
   return out;
 };
 
-// Claves de gastos fijos que se cargan en Principal
-export const GASTOS_FIJOS_KEYS = ['icbc','bna','prestamos','nicolas','segundo','alquiler'];
+// ── Gastos: ítems unificados (Zapia + tarjetas) ─────────────────────
+// Cada ítem lleva un id estable: el de Zapia lo genera el backend; el de tarjeta
+// es id_unico. Sirve para vincular el detalle de Auto sin duplicar el gasto.
+export const itemsDeZapia = (zapiaData, pred) => (zapiaData||[])
+  .filter(r => r.fecha && pred(r.fecha))
+  .map(r => ({ id: r.id || `z|${r.fecha}|${r.hora||''}|${r.que}|${r.costo}`, key:r.que, monto:r.costo, fecha:r.fecha, quien:r.quien, medio:r.medio, origen:'zapia' }));
 
-// Total de gastos fijos marcados en Principal para un mes dado.
-// Replica la misma prioridad que usa Principal: si Zapia ya cargó el total de una tarjeta
-// (icbc/bna) ese mes, se usa ese valor por sobre lo cargado a mano o lo recurrente.
-export const calcularGastosFijos = (monthly, gastosRecurrentes, totalesTarjetas, mesKey) => {
-  const s    = monthly?.[mesKey] || {};
-  const tMes = totalesTarjetas?.[mesKey] || {};
-  const rec  = gastosRecurrentes || {};
-  return GASTOS_FIJOS_KEYS.reduce((sum, key) => {
-    if ((key === 'icbc' || key === 'bna') && tMes[key] !== undefined) return sum + tMes[key];
-    const val = s.gastos?.[key] !== undefined && s.gastos?.[key] !== '' ? s.gastos[key] : (rec[key] || '');
-    return sum + n(val);
-  }, 0);
-};
+export const itemsDeTarjetas = (tarjetasData, dolarMap, pred) => (tarjetasData||[])
+  .filter(pred)
+  .map(m => {
+    const dolar = n(dolarMap?.[m.mes]) || 0;
+    return { id: m.id || `t|${m.tarjeta}|${m.fecha}|${m.comercio}|${m.importe}`, key:m.comercio, monto:montoEnPesos(m, dolar),
+             fecha:m.fecha, mes:m.mes, tarjeta:m.tarjeta, cuotas:m.cuotas, tipoMovimiento:m.tipoMovimiento,
+             moneda:m.moneda, importe:m.importe, origen:'tarjeta' };
+  });
 
-// Igual que calcularGastosFijos pero SIN incluir icbc/bna (para Cierre Real,
-// donde los gastos de tarjeta ya están contados en agruparGastosPorCategoria).
-export const calcularGastosFijosSinTarjetas = (monthly, gastosRecurrentes, mesKey) => {
-  const s   = monthly?.[mesKey] || {};
-  const rec = gastosRecurrentes || {};
-  const keysSinTarjetas = GASTOS_FIJOS_KEYS.filter(k => k !== 'icbc' && k !== 'bna');
-  return keysSinTarjetas.reduce((sum, key) => {
-    const val = s.gastos?.[key] !== undefined && s.gastos?.[key] !== '' ? s.gastos[key] : (rec[key] || '');
-    return sum + n(val);
-  }, 0);
-};
+export const itemsDelMes = (zapiaData, tarjetasData, dolarMap, mesKey) => [
+  ...itemsDeZapia(zapiaData, f => monthOf(f) === mesKey),
+  ...itemsDeTarjetas(tarjetasData, dolarMap, m => m.mes === mesKey),
+];
+// La vista semanal usa la fecha real de la compra. Las compras de tarjeta
+// recientes aparecen recién cuando llega el resumen.
+export const itemsDeLaSemana = (zapiaData, tarjetasData, dolarMap, fechasSemana) => [
+  ...itemsDeZapia(zapiaData, f => fechasSemana.includes(f)),
+  ...itemsDeTarjetas(tarjetasData, dolarMap, m => fechasSemana.includes(m.fecha)),
+];
 
-// Junta los gastos cargados via Zapia (WhatsApp) y TODOS los movimientos de Tarjetas
-// de un mes, y los agrupa por categoria usando las mismas categorias para ambos.
-// Cuotas van a "Cuotas", financieros a "Pagos/Impuestos/Intereses", y el resto se
-// categoriza con las reglas compartidas (categorizarMovimientoTarjeta / categorizarUno).
-export const agruparGastosPorCategoria = (zapiaData, tarjetasData, categories, dolarTarjetaMap, mesKey) => {
-  const zapiaItems = (zapiaData||[])
-    .filter(r => r.fecha && monthOf(r.fecha) === mesKey)
-    .map(r => ({ key:r.que, monto:r.costo, fecha:r.fecha, quien:r.quien, medio:r.medio, origen:'zapia' }));
-
-  const tarjetaItems = (tarjetasData||[])
-    .filter(m => m.mes === mesKey)
-    .map(m => {
-      const dolar = n(dolarTarjetaMap?.[m.mes]) || 0;
-      const monto = m.moneda === 'USD' ? m.importe * dolar : m.importe;
-      return { key:m.comercio, monto, fecha:m.fecha, tarjeta:m.tarjeta, cuotas:m.cuotas, tipoMovimiento:m.tipoMovimiento, origen:'tarjeta' };
-    });
-
-  const items  = [...zapiaItems, ...tarjetaItems];
+export const agruparItems = (items, categories) => {
   const grupos = {};
   items.forEach(item => {
-    const cat = item.origen === 'tarjeta'
-      ? categorizarMovimientoTarjeta({ comercio:item.key, cuotas:item.cuotas, tipoMovimiento:item.tipoMovimiento }, categories)
-      : (categories[item.key] || categorizarUno(item.key));
+    const cat = categorizarItem(item, categories);
     if (!grupos[cat.categoria]) grupos[cat.categoria] = { emoji:cat.emoji, items:[], total:0 };
     grupos[cat.categoria].items.push(item);
     grupos[cat.categoria].total += item.monto;
   });
-
-  return { items, grupos, total: items.reduce((s,i)=>s+i.monto,0) };
+  return grupos;
 };
 
-// Total de los movimientos MANUALES de ahorro (ajuste inicial, ingresos
-// extraordinarios, retiros) hasta un mes dado (o todos, si no se pasa upTo).
-// Se suma aparte del acumulado automático de saldos mensuales positivos.
+export const agruparGastosPorCategoria = (zapiaData, tarjetasData, categories, dolarTarjetaMap, mesKey) => {
+  const items = itemsDelMes(zapiaData, tarjetasData, dolarTarjetaMap, mesKey);
+  return { items, grupos: agruparItems(items, categories), total: items.reduce((s,i)=>s+i.monto,0) };
+};
+
+// ── Auto: consulta sobre Gastos (no guarda gastos propios) ─────────
+export const resumenAuto = (grupos) => {
+  const out = {};
+  Object.entries(GRUPOS_AUTO).forEach(([k, g]) => {
+    const items = g.categorias.flatMap(c => grupos[c]?.items || []);
+    out[k] = { ...g, items, total: items.reduce((s,i)=>s+i.monto,0) };
+  });
+  return out;
+};
+export const resumenAutoMeses = (zapiaData, tarjetasData, categories, dolarMap, meses) => {
+  const porMes = meses.map(mes => {
+    const { grupos } = agruparGastosPorCategoria(zapiaData, tarjetasData, categories, dolarMap, mes);
+    const r = resumenAuto(grupos);
+    return { mes, combustible:r.combustible.total, peajes:r.peajes.total, mantenimiento:r.mantenimiento.total, sinClasificar:r.sinClasificar.total };
+  });
+  const tot = porMes.reduce((a,m)=>({
+    combustible:a.combustible+m.combustible, peajes:a.peajes+m.peajes,
+    mantenimiento:a.mantenimiento+m.mantenimiento, sinClasificar:a.sinClasificar+m.sinClasificar }),
+    { combustible:0, peajes:0, mantenimiento:0, sinClasificar:0 });
+  return { porMes, total: tot };
+};
+export const brutoUberDiDiMes = (uberDiDi, mesKey) =>
+  (uberDiDi||[]).filter(r => r.fecha && r.fecha.slice(0,7) === mesKey).reduce((s,r) => s + n(r.total), 0);
+
+// ── Gastos fijos y resultado mensual (UNA sola definición) ──────────
+export const GASTOS_FIJOS_KEYS = ['icbc','bna','prestamos','nicolas','segundo','alquiler'];
+const EMPTY_GASTOS = () => Object.fromEntries(GASTOS_FIJOS_KEYS.map(k => [k,'']));
+
+// Mes tal como lo ve la familia: el total de tarjeta calculado de los resúmenes
+// pisa lo manual; lo vacío toma el valor recurrente.
+export const resolverMes = (monthly, recurrentes, totalesTarjetas, key) => {
+  const s = monthly?.[key] || {};
+  const tMes = totalesTarjetas?.[key] || {};
+  const gastos = {};
+  Object.keys(EMPTY_GASTOS()).forEach(k => {
+    if ((k === 'icbc' || k === 'bna') && tMes[k] !== undefined) { gastos[k] = String(Math.round(tMes[k])); return; }
+    gastos[k] = s.gastos?.[k] || (recurrentes?.[k] ? String(recurrentes[k]) : '');
+  });
+  return { ingresos:{ julieta:'', ...(s.ingresos||{}) }, gastos, deuda_anterior: s.deuda_anterior || 0 };
+};
+
+// Resultado mensual = ingresos (sueldo Julieta + lo juntado en Uala) − egresos
+// (fijos con tarjetas + deuda anterior). Los gastos de Zapia ya están netos en el
+// saldo de Uala y la diferencia de conciliación nunca se descuenta aparte.
+export const calcularTotalesMes = (mes, germanIncome) => {
+  const ing     = n(mes.ingresos?.julieta) + germanIncome;
+  const gas     = Object.values(mes.gastos||{}).reduce((s,v)=>s+n(v),0);
+  const deuda   = n(mes.deuda_anterior) || 0;
+  const egresos = gas + deuda;
+  return { ing, gas, deuda, egresos, saldo: ing - egresos, germanIncome };
+};
+
+export const calcularResultadoMensual = (ctx, key) => {
+  const mes = resolverMes(ctx.monthly, ctx.gastosRecurrentes, ctx.totalesTarjetas, key);
+  const germanIncome = calcularIngresoGerman(ctx.uberDiDi, key, ctx.zapiaData, ctx.saldoJulieta, ctx.hoyStr);
+  return { mes, ...calcularTotalesMes(mes, germanIncome) };
+};
+
+// Ahorro automático: suma de saldos mensuales positivos hasta un mes.
+export const calcularAhorroAcumulado = (ctx, upTo) =>
+  Object.keys(ctx.monthly||{}).sort().filter(k => k <= upTo)
+    .reduce((s,k) => s + Math.max(0, calcularResultadoMensual(ctx, k).saldo), 0);
+
+// Movimientos MANUALES de ahorro (ajuste inicial, ingresos extra, retiros).
 export const calcularAhorroManual = (movimientos, upTo) => (movimientos||[])
   .filter(m => !upTo || (m.fecha && m.fecha.slice(0,7) <= upTo))
   .reduce((s,m) => s + (m.tipo === 'retiro' ? -n(m.monto) : n(m.monto)), 0);
 
-// Total de UNA categoría específica en cada uno de los meses dados —
-// alimenta el gráfico de tendencia que aparece al abrir una categoría.
-export const historialCategoriaPorMes = (categoria, zapiaData, tarjetasData, categories, dolarTarjetaMap, mesesKeys) =>
-  mesesKeys.map(mes => {
-    const { grupos } = agruparGastosPorCategoria(zapiaData, tarjetasData, categories, dolarTarjetaMap, mes);
-    return { mes: fmtKey(mes).split(' ')[0].substring(0,3), total: grupos[categoria]?.total || 0 };
-  });
+// Fila de la hoja "Control 2026". La calcula el CLIENTE con las mismas funciones
+// que la pantalla; el servidor solo la escribe (no recalcula nada).
+export const calcularFilaControl = (ctx, key, ahora = '') => {
+  const [y, m] = key.split('-');
+  const r = calcularResultadoMensual(ctx, key);
+  const g = r.mes.gastos;
+  return [`${MESES[parseInt(m,10)-1]} ${y}`, n(r.mes.ingresos.julieta), r.germanIncome, r.ing,
+          n(g.icbc), n(g.bna), n(g.prestamos), n(g.nicolas), n(g.segundo), n(g.alquiler),
+          r.gas, r.deuda, r.egresos, r.saldo, ahora];
+};
+export const calcularFilasControl = (ctx, ahora = '') =>
+  Object.keys(ctx.monthly||{}).sort().map(k => calcularFilaControl(ctx, k, ahora));
+
+// Fijos del Principal SIN icbc/bna (en Cierre económico las tarjetas ya están
+// contadas dentro de los gastos por categoría).
+export const calcularGastosFijosSinTarjetas = (monthly, gastosRecurrentes, mesKey) => {
+  const g = resolverMes(monthly, gastosRecurrentes, {}, mesKey).gastos;
+  return GASTOS_FIJOS_KEYS.filter(k => k !== 'icbc' && k !== 'bna').reduce((s,k) => s + n(g[k]), 0);
+};

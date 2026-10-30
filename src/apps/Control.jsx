@@ -1,18 +1,26 @@
 import { useState } from 'react';
-import { $$, n, getKey, getMonday, weekDates, dateStr, monthOf, fmtDate, hoy, calcularReconciliacionJulieta } from '../utils.js';
+import {
+  $$, n, getKey, getMonday, weekDates, dateStr, monthOf, fmtDate, hoy,
+  calcularConciliaciones, calcularPeriodoAbierto, aportesAUala, gastosZapiaDe, conciliarGerman,
+} from '../utils.js';
 
-function ResultadoCard({ label, valor }) {
-  const ok = valor >= 0;
+// Diferencia de conciliación: negativa = salió plata sin registrar (gasto hormiga),
+// positiva = sobra plata. Es solo un control: NUNCA se resta del resultado mensual.
+function DiferenciaCard({ label, diferencia }) {
+  const cero = Math.round(diferencia) === 0;
+  const hormiga = diferencia < 0;
+  const tono = cero ? 'positive' : hormiga ? 'negative' : 'accent';
+  const bg  = { positive:'bg-positive-soft', negative:'bg-negative-soft', accent:'bg-accent-soft' }[tono];
+  const txt = { positive:'text-positive', negative:'text-negative', accent:'text-accent-strong' }[tono];
   return (
-    <div className={`flex justify-between items-center px-4 py-2.5 border-t-2 border-border-soft ${ok ? 'bg-positive-soft' : 'bg-negative-soft'}`}>
+    <div className={`flex justify-between items-center px-4 py-2.5 border-t-2 border-border-soft ${bg}`}>
       <div>
-        <div className={`text-[13px] font-bold ${ok ? 'text-positive' : 'text-negative'}`}>{label}</div>
-        {!ok && <div className="text-[11px] text-negative mt-0.5">Gasto hormiga — plata no registrada</div>}
-        {ok && <div className="text-[11px] text-positive mt-0.5">✓ OK</div>}
+        <div className={`text-[13px] font-bold ${txt}`}>{label}</div>
+        <div className={`text-[11px] mt-0.5 ${txt}`}>
+          {cero ? '✓ Cierra justo' : hormiga ? 'Gasto hormiga: salió plata que no está registrada' : 'Sobrante: hay más plata de la esperada'}
+        </div>
       </div>
-      <div className={`text-xl font-extrabold tabular-nums ${ok ? 'text-positive' : 'text-negative'}`}>
-        {ok ? $$(valor) : `-${$$(Math.abs(valor))}`}
-      </div>
+      <div className={`text-xl font-extrabold tabular-nums ${txt}`}>{diferencia < 0 ? `-${$$(Math.abs(diferencia))}` : $$(diferencia)}</div>
     </div>
   );
 }
@@ -26,7 +34,7 @@ function LineaInfo({ label, valor, color, sub }) {
   );
 }
 
-export default function Control({ appData, saveData, zapiaData, onRefresh }) {
+export default function Control({ appData, saveData, zapiaData, onRefresh, mesKey, embebido }) {
   const today = new Date();
   const [filtro, setFiltro]   = useState('semana');
   const [monday, setMonday]   = useState(() => getMonday(today));
@@ -40,88 +48,53 @@ export default function Control({ appData, saveData, zapiaData, onRefresh }) {
   const sunday    = wDates[6];
   const sundayStr = dateStr(sunday);
   const wStr      = wDates.map(d => dateStr(d));
-  const mesKey    = getKey(today);
+  const mes       = mesKey || getKey(today);
+  const hoyStr    = hoy();
 
   const uberDiDi     = appData.uberDiDi     || [];
   const saldoJulieta = appData.saldoJulieta || {};
 
-  const inPeriod = fecha => {
-    if (!fecha) return false;
-    if (filtro === 'semana') return wStr.includes(fecha);
-    return monthOf(fecha) === mesKey;
-  };
-
+  const inPeriod = fecha => !!fecha && (filtro === 'semana' ? wStr.includes(fecha) : monthOf(fecha) === mes);
   const periodUD    = uberDiDi.filter(r => inPeriod(r.fecha));
-  const periodZapia = zapiaData.filter(r => inPeriod(r.fecha));
+  const periodZapia = (zapiaData||[]).filter(r => inPeriod(r.fecha));
 
-  const brutoUD         = periodUD.reduce((s,r) => s + (r.total || 0), 0);
-  const transferido     = periodUD.reduce((s,r) => s + (r.transferencia || 0), 0);
-  const gastosZapiaGerm = periodZapia.filter(r => r.quien === 'Germán').reduce((s,r) => s + r.costo, 0);
-
+  // ── Germán: su bruto se usa para sus gastos, lo girado/depositado a Uala y el efectivo que queda.
+  const brutoUD = periodUD.reduce((s,r) => s + n(r.total), 0);
+  const aportes = periodUD.reduce((s,r) => s + n(r.transferencia) + n(r.efectivoCierreMes), 0);
+  const gastosGerman = periodZapia.filter(r => r.quien === 'Germán').reduce((s,r) => s + n(r.costo), 0);
   const getEfectivo = () => {
-    if (filtro === 'semana') { const rec = uberDiDi.find(r => r.fecha === sundayStr); return n(rec?.efectivoEnMano); }
-    const recs = uberDiDi.filter(r => monthOf(r.fecha) === mesKey && r.efectivoEnMano > 0).sort((a,b) => b.fecha.localeCompare(a.fecha));
+    if (filtro === 'semana') return n(uberDiDi.find(r => r.fecha === sundayStr)?.efectivoEnMano);
+    const recs = uberDiDi.filter(r => monthOf(r.fecha) === mes && n(r.efectivoEnMano) > 0).sort((a,b) => b.fecha.localeCompare(a.fecha));
     return n(recs[0]?.efectivoEnMano);
   };
   const efectivo = getEfectivo();
-  const resultadoGerman = brutoUD - transferido - efectivo - gastosZapiaGerm;
+  const cg = conciliarGerman({ bruto:brutoUD, gastos:gastosGerman, aportes, efectivo });
 
-  const gastosZapiaJuli = periodZapia.filter(r => r.quien === 'Julieta' && r.medio === 'transferencia').reduce((s,r) => s + r.costo, 0);
+  // ── Julieta: conciliación de la cuenta Uala
+  const periodos = calcularConciliaciones(saldoJulieta, uberDiDi, zapiaData);
+  const periodoSemana = filtro === 'semana' ? periodos.find(p => p.fechaFin === sundayStr) : null;
+  const periodosMes   = filtro === 'mes' ? periodos.filter(p => p.fechaFin.slice(0,7) === mes) : [];
+  const hayConciliacion = filtro === 'semana' ? !!periodoSemana : periodosMes.length > 0;
+  const abierto = calcularPeriodoAbierto(saldoJulieta, uberDiDi, zapiaData, hoyStr);
+  const mostrarAbierto = !hayConciliacion && abierto && (filtro === 'semana' || mes === hoyStr.slice(0,7));
+  const suma = (campo) => periodosMes.reduce((s,p) => s + p[campo], 0);
+  const vista = filtro === 'semana' ? periodoSemana : (periodosMes.length ? {
+    saldoIni: periodosMes[0].saldoIni, saldoReal: periodosMes[periodosMes.length-1].saldoReal,
+    transferido: suma('transferido'), deposito: suma('deposito'), gastosJulieta: suma('gastosJulieta'),
+    esperado: periodosMes[periodosMes.length-1].esperado, diferencia: suma('diferencia'),
+  } : null);
 
-  // Reconciliación real: compara cada carga de saldo de Julieta contra la
-  // anterior (S0), así el gasto hormiga sale de lo que NO se explica ni por
-  // gastos registrados ni por lo que quedó en el saldo real.
-  const periodosJulieta = calcularReconciliacionJulieta(saldoJulieta, uberDiDi, zapiaData);
-  const periodoSemana   = filtro==='semana' ? periodosJulieta.find(p => p.fechaFin === sundayStr) : null;
-  const periodosMes     = filtro==='mes'    ? periodosJulieta.filter(p => p.fechaFin.slice(0,7) === mesKey) : [];
-  const esMesActual     = mesKey === getKey(today);
-
-  // Período ABIERTO: desde la última carga real hasta hoy, todavía sin
-  // cerrar. Si hoy es lunes y Julieta cargó ayer domingo, ese domingo cae
-  // en "la semana pasada" con el calendario Lun-Dom — sin esto, la pantalla
-  // mostraría "no cargó" a pesar de que sí hay un dato reciente y válido.
-  const fechasCargadas = Object.keys(saldoJulieta).sort();
-  const ultimaFecha = fechasCargadas.length ? fechasCargadas[fechasCargadas.length-1] : null;
-  let periodoAbierto = null;
-  if (ultimaFecha) {
-    const hoyStr = hoy();
-    const S0 = n(saldoJulieta[ultimaFecha]);
-    const transferidoAbierto = uberDiDi
-      .filter(r => r.fecha && r.fecha > ultimaFecha && r.fecha <= hoyStr)
-      .reduce((s,r) => s + (r.transferencia||0), 0);
-    const gastosAbierto = zapiaData
-      .filter(r => r.fecha && r.fecha > ultimaFecha && r.fecha <= hoyStr && r.quien === 'Julieta' && r.medio === 'transferencia')
-      .reduce((s,r) => s + r.costo, 0);
-    periodoAbierto = {
-      fechaInicio: ultimaFecha, saldoIni: S0,
-      transferido: transferidoAbierto, gastosZapia: gastosAbierto,
-      saldoEstimado: S0 + transferidoAbierto - gastosAbierto,
-    };
-  }
-
-  const hayReconciliacion = filtro==='semana' ? !!periodoSemana : periodosMes.length>0;
-  const mostrarAbierto = !hayReconciliacion && periodoAbierto && (
-    (filtro==='semana') || (filtro==='mes' && esMesActual)
-  );
-
-  const gastoHormiga      = filtro==='semana' ? (periodoSemana?.gastoHormiga||0)   : periodosMes.reduce((s,p)=>s+p.gastoHormiga,0);
-  const ingresoGermanJuli = filtro==='semana' ? (periodoSemana?.ingresoGerman||0) : periodosMes.reduce((s,p)=>s+p.ingresoGerman,0);
-  const resultadoJulieta  = -gastoHormiga; // negativo si hubo gasto hormiga, 0 si cerró justo
-
-  const getSaldoJuli = () => {
-    if (filtro === 'semana') return n(saldoJulieta[sundayStr]);
-    const keys = Object.keys(saldoJulieta).filter(k => monthOf(k) === mesKey).sort();
-    return keys.length ? n(saldoJulieta[keys[keys.length - 1]]) : 0;
-  };
-  const saldoJuli = getSaldoJuli();
+  const saldoActual = filtro === 'semana'
+    ? saldoJulieta[sundayStr]
+    : (() => { const ks = Object.keys(saldoJulieta).filter(k => monthOf(k) === mes).sort(); return ks.length ? saldoJulieta[ks[ks.length-1]] : undefined; })();
+  const fechaSaldo = filtro === 'semana' ? sundayStr : (Object.keys(saldoJulieta).filter(k => monthOf(k) === mes).sort().pop() || sundayStr);
 
   const guardarSaldoJuli = async () => {
     if (!saldoJuliInput) return;
     setSaving(true);
-    const updated = { ...saldoJulieta, [sundayStr]: n(saldoJuliInput) };
-    await saveData({ ...appData, saldoJulieta: updated });
-    setSaldoJuliInput('');
-    setSaving(false);
+    // Una carga por fecha: volver a cargar el mismo día reemplaza, no suma otra conciliación.
+    await saveData({ ...appData, saldoJulieta: { ...saldoJulieta, [sundayStr]: n(saldoJuliInput) } });
+    setSaldoJuliInput(''); setSaving(false);
   };
 
   const prevWeek = () => { const d=new Date(monday); d.setDate(d.getDate()-7); setMonday(d); };
@@ -129,23 +102,22 @@ export default function Control({ appData, saveData, zapiaData, onRefresh }) {
   const isCurrentWeek = sundayStr === dateStr(weekDates(getMonday(today))[6]);
 
   return (
-    <div className="max-w-[640px] mx-auto p-4 bg-paper min-h-[calc(100vh-70px)]">
-      <div className="rounded-2xl px-5 py-4.5 mb-4.5 text-white shadow-md flex justify-between items-center bg-tab-control">
-        <div>
-          <div className="text-xl font-extrabold tracking-tight">📊 Control</div>
-          <div className="text-xs opacity-75 mt-0.5">Seguimiento semanal de flujo de dinero</div>
+    <div className={embebido ? '' : 'max-w-[640px] mx-auto p-4 bg-paper min-h-[calc(100vh-70px)]'}>
+      {!embebido && (
+        <div className="rounded-2xl px-5 py-4.5 mb-4.5 text-white shadow-md flex justify-between items-center bg-tab-control">
+          <div>
+            <div className="text-xl font-extrabold tracking-tight">📊 Control</div>
+            <div className="text-xs opacity-75 mt-0.5">Conciliación semanal de la cuenta Uala</div>
+          </div>
+          <button onClick={handleRefresh} disabled={refreshing}
+            className="bg-white/15 border border-white/30 rounded-lg text-white px-2.5 py-1.5 cursor-pointer text-xs font-bold touch-manipulation">{refreshing ? '...' : '↻'}</button>
         </div>
-        <button onClick={handleRefresh} disabled={refreshing}
-          className="bg-white/15 border border-white/30 rounded-lg text-white px-2.5 py-1.5 cursor-pointer text-xs font-bold touch-manipulation">
-          {refreshing ? '...' : '↻'}
-        </button>
-      </div>
+      )}
 
       <div className="flex bg-border-soft rounded-xl p-1 mb-3.5 gap-0.5">
-        {[['semana','📅 Semana'],['mes','🗓️ Este mes']].map(([k,label]) => (
+        {[['semana','📅 Semana'],['mes','🗓️ Mes']].map(([k,label]) => (
           <button key={k} onClick={() => setFiltro(k)}
-            className={`flex-1 py-2.5 border-none rounded-lg cursor-pointer font-bold text-[13px] touch-manipulation transition-colors
-              ${filtro===k ? 'bg-white text-ink shadow-sm' : 'bg-transparent text-muted'}`}>{label}</button>
+            className={`flex-1 py-2.5 border-none rounded-lg cursor-pointer font-bold text-[13px] touch-manipulation transition-colors ${filtro===k ? 'bg-white text-ink shadow-sm' : 'bg-transparent text-muted'}`}>{label}</button>
         ))}
       </div>
 
@@ -161,78 +133,95 @@ export default function Control({ appData, saveData, zapiaData, onRefresh }) {
       )}
 
       <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
-        <div className="bg-german text-white px-4 py-2.5 font-bold text-[13px]">👨 Germán</div>
+        <div className="bg-german text-white px-4 py-2.5 font-bold text-[13px]">👨 Germán — del bruto a la Uala</div>
         {brutoUD > 0 ? <>
           <LineaInfo label="Bruto Uber/DiDi" valor={brutoUD} color="var(--color-german)"/>
-          <LineaInfo label="Transferido a Julieta" valor={transferido} color="var(--color-tab-tarjetas)"/>
-          <LineaInfo label="Efectivo en mano" valor={efectivo} color="var(--color-german)"/>
+          <LineaInfo label="Mis gastos (Zapia, efectivo y transferencia)" valor={gastosGerman} color="var(--color-tab-gastos)"/>
+          <LineaInfo label="Girado / depositado a la Uala de Julieta" valor={aportes} color="var(--color-tab-tarjetas)"/>
+          <LineaInfo label="Efectivo que me queda" valor={efectivo} color="var(--color-german)"/>
           {efectivo === 0 && <div className="px-4 py-1.5 text-[11px] text-muted-light border-t border-border-soft">Sin efectivo registrado {filtro==='semana'?'este domingo':'este mes'}.</div>}
-          <LineaInfo label="Gastos Zapia de Germán" valor={gastosZapiaGerm} color="var(--color-tab-gastos)"/>
-          <ResultadoCard label="Resultado Germán" valor={resultadoGerman}/>
+          <DiferenciaCard label="Diferencia Germán" diferencia={cg.diferencia}/>
         </> : (
           <div className="p-5 text-center text-muted-light text-[13px]">
-            Sin ganancias registradas {filtro==='semana'?'esta semana':'este mes'}.<br/><span className="text-[11px]">Cargalas desde <strong>Ganancias</strong>.</span>
+            Sin ganancias registradas {filtro==='semana'?'esta semana':'este mes'}.<br/><span className="text-[11px]">Cargalas desde <strong>Auto</strong>.</span>
           </div>
         )}
       </div>
 
       <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
-        <div className="bg-julieta text-white px-4 py-2.5 font-bold text-[13px]">👩 Julieta</div>
+        <div className="bg-julieta text-white px-4 py-2.5 font-bold text-[13px]">👩 Julieta — cuenta Uala</div>
 
-        {hayReconciliacion ? (
+        {hayConciliacion && vista ? (
           <>
-            {filtro==='semana' ? (
-              <LineaInfo label="Saldo domingo anterior" valor={periodoSemana.saldoIni} color="var(--color-muted)"/>
-            ) : (
-              <LineaInfo label="Transferido este mes" valor={periodosMes.reduce((s,p)=>s+p.transferido,0)} color="var(--color-tab-tarjetas)"/>
-            )}
-            {filtro==='semana' && <LineaInfo label="Transferido esta semana" valor={periodoSemana.transferido} color="var(--color-tab-tarjetas)"/>}
-            <LineaInfo label="Gastos Zapia via transferencia" valor={filtro==='semana'?periodoSemana.gastosZapia:periodosMes.reduce((s,p)=>s+p.gastosZapia,0)} color="var(--color-tab-gastos)"/>
-            <LineaInfo label="Ingreso real de Germán (diferencia de saldo)" valor={ingresoGermanJuli} color="var(--color-german)"/>
+            <LineaInfo label="Saldo real anterior" valor={vista.saldoIni} color="var(--color-muted)"/>
+            <LineaInfo label="Transferencias del período" valor={vista.transferido} color="var(--color-tab-tarjetas)"/>
+            {vista.deposito > 0 && <LineaInfo label="Depósito de fin de mes" valor={vista.deposito} color="var(--color-tab-tarjetas)"/>}
+            <LineaInfo label="Gastos de Julieta (Zapia)" valor={vista.gastosJulieta} color="var(--color-tab-gastos)"/>
+            <LineaInfo label="Saldo esperado" valor={vista.esperado} color="var(--color-ink)"/>
+            <LineaInfo label="Saldo real informado" valor={vista.saldoReal} color="var(--color-ink)"/>
+            <DiferenciaCard label="Diferencia de conciliación" diferencia={vista.diferencia}/>
           </>
         ) : mostrarAbierto ? (
           <>
-            <LineaInfo label={`Saldo cargado el ${fmtDate(new Date(periodoAbierto.fechaInicio+'T12:00:00'))}`} valor={periodoAbierto.saldoIni} color="var(--color-muted)"/>
-            <LineaInfo label="Transferido desde esa carga" valor={periodoAbierto.transferido} color="var(--color-tab-tarjetas)"/>
-            <LineaInfo label="Gastos Zapia via transferencia" valor={periodoAbierto.gastosZapia} color="var(--color-tab-gastos)"/>
-            <LineaInfo label="Saldo estimado a hoy" valor={periodoAbierto.saldoEstimado} color="var(--color-ink)"/>
+            <LineaInfo label={`Saldo real cargado el ${fmtDate(new Date(abierto.fechaInicio+'T12:00:00'))}`} valor={abierto.saldoIni} color="var(--color-muted)"/>
+            <LineaInfo label="Transferido desde esa carga" valor={abierto.transferido} color="var(--color-tab-tarjetas)"/>
+            {abierto.deposito > 0 && <LineaInfo label="Depósito de fin de mes" valor={abierto.deposito} color="var(--color-tab-tarjetas)"/>}
+            <LineaInfo label="Gastos de Julieta (Zapia)" valor={abierto.gastosJulieta} color="var(--color-tab-gastos)"/>
+            <LineaInfo label="Saldo esperado a hoy" valor={abierto.saldoEstimado} color="var(--color-ink)"/>
             <div className="px-4 py-2.5 text-[11px] text-accent-strong border-t border-border-soft bg-[#FFFBF5]">
-              ⏳ Todavía no cerró — el gasto hormiga se confirma cuando Julieta vuelva a cargar su saldo real.
+              ⏳ Período abierto: la diferencia se calcula cuando Julieta cargue su saldo real.
             </div>
           </>
         ) : (
           <div className="px-4 py-3 text-[12px] text-muted-light border-t border-border-soft">
-            {ultimaFecha
-              ? 'Todavía no hay una carga de saldo reciente para reconciliar.'
-              : 'Julieta todavía no cargó ningún saldo real — cargá el primero para empezar a trackear el gasto hormiga.'}
+            {Object.keys(saldoJulieta).length
+              ? 'No hay una conciliación cerrada en este período.'
+              : 'Julieta todavía no cargó ningún saldo real: el primero es el punto de partida y recién el siguiente se concilia.'}
           </div>
         )}
 
         <div className="px-4 py-3 border-t border-border-soft">
-          <div className="text-xs text-muted mb-2 font-semibold">
-            💳 Saldo real en cuenta — {filtro==='semana' ? `domingo ${fmtDate(sunday)}` : `último domingo del mes`}
-          </div>
-          {saldoJuli > 0 && !saldoJuliInput && (
+          <div className="text-xs text-muted mb-2 font-semibold">💳 Saldo real de Uala — domingo {fmtDate(sunday)}</div>
+          {saldoActual > 0 && !saldoJuliInput && (
             <div className="text-sm font-bold text-ink mb-2">
-              Registrado: {$$(saldoJuli)}
-              <button onClick={() => setSaldoJuliInput(String(saldoJuli))}
+              Registrado ({fmtDate(new Date(fechaSaldo+'T12:00:00'))}): {$$(saldoActual)}
+              <button onClick={() => setSaldoJuliInput(String(saldoActual))}
                 className="ml-2.5 border-none bg-border-soft rounded-md cursor-pointer text-[11px] text-muted px-2 py-0.5 touch-manipulation">editar</button>
             </div>
           )}
           <div className="flex gap-2">
             <div className={`flex-1 flex items-center bg-[#FAFAFA] rounded-lg border-[1.5px] px-3 py-1.5 gap-1 ${saldoJuliInput?'border-julieta':'border-border'}`}>
               <span className="text-muted-light font-semibold">$</span>
-              <input type="number" inputMode="numeric" min="0" value={saldoJuliInput}
-                onChange={e => setSaldoJuliInput(e.target.value)} placeholder="0"
+              <input type="number" inputMode="numeric" min="0" value={saldoJuliInput} onChange={e => setSaldoJuliInput(e.target.value)} placeholder="0"
                 className="flex-1 border-none outline-none text-lg font-bold text-ink bg-transparent tabular-nums"/>
             </div>
             <button onClick={guardarSaldoJuli} disabled={!saldoJuliInput || saving}
               className={`px-4 py-2 border-none rounded-lg cursor-pointer font-bold text-[13px] text-white touch-manipulation ${saving ? 'bg-muted-light' : 'bg-julieta'}`}>{saving ? '...' : 'Guardar'}</button>
           </div>
-          <div className="text-[11px] text-muted-light mt-1.5">Lo carga Julieta el domingo, sin saltear semanas si es posible — así el gasto hormiga se calcula bien.</div>
+          <div className="text-[11px] text-muted-light mt-1.5">Lo carga Julieta el domingo. Cada saldo real es el punto de partida de la conciliación siguiente.</div>
         </div>
-        {hayReconciliacion && <ResultadoCard label="Resultado Julieta" valor={resultadoJulieta}/>}
       </div>
+
+      {periodos.length > 0 && (
+        <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
+          <div className="bg-ink text-white px-4 py-2.5 font-bold text-[13px]">Historial de conciliaciones</div>
+          <table className="w-full border-collapse text-xs">
+            <thead><tr className="bg-border-soft">
+              {['Cierre','Esperado','Real','Dif.'].map(h => <th key={h} className={`px-2.5 py-2 ${h==='Cierre'?'text-left':'text-right'} text-muted font-bold border-b border-border text-[10px] uppercase`}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {[...periodos].reverse().slice(0,12).map((p,i) => (
+                <tr key={p.fechaFin} className={i%2===0?'bg-white':'bg-paper'}>
+                  <td className="px-2.5 py-2 font-semibold text-ink">{fmtDate(new Date(p.fechaFin+'T12:00:00'))}</td>
+                  <td className="px-2.5 py-2 text-right tabular-nums text-muted">{$$(p.esperado)}</td>
+                  <td className="px-2.5 py-2 text-right tabular-nums text-ink">{$$(p.saldoReal)}</td>
+                  <td className={`px-2.5 py-2 text-right font-bold tabular-nums ${p.diferencia<0?'text-negative':p.diferencia>0?'text-accent-strong':'text-positive'}`}>{p.diferencia<0?`-${$$(Math.abs(p.diferencia))}`:$$(p.diferencia)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
