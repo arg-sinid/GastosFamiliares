@@ -5,6 +5,7 @@ import {
   calcularResultadoMensual, calcularTotalesTarjetas, dedupePorId, itemsDelMes, itemsDeLaSemana,
   agruparGastosPorCategoria, agruparItems, resumenAuto, calcularFilasControl, calcularAhorroAcumulado,
   weekDates, getMonday, dateStr, hoy, calcularAhorroManual,
+  calcularVencimientos, fechaVencimiento, vehiculoDeGasto, esCategoriaAuto, resumenAutoMeses,
 } from '../src/utils.js';
 import { categorizarUno } from '../src/categorias.js';
 
@@ -187,4 +188,65 @@ test('caso real: saldo declarado 600.000 el domingo 25/10 → Principal muestra 
   const u2 = [...u, uber('2026-10-26',{ transferencia:10000 })];
   const z2 = [...z, zap('2026-10-27','Julieta',4000,'efectivo')];
   assert.equal(calcularIngresoGerman(u2, '2026-10', z2, s, '2026-10-28'), 600000 + 10000 - 4000);
+});
+
+// ── Vencimientos ─────────────────────────────────────────────────────
+const venc = { icbc:{ dia:3, mesSiguiente:true }, prestamos:{ dia:3, mesSiguiente:true }, bna:{ dia:4, mesSiguiente:true } };
+const gastosOct = { icbc:'900000', bna:'600000', prestamos:'300000', alquiler:'500000', nicolas:'' };
+
+test('vencimientos: el resumen de octubre vence en noviembre y se acumula por fecha', () => {
+  const r = calcularVencimientos({ vencimientos:venc, gastos:gastosOct, mesKey:'2026-10', hoyStr:'2026-10-30', disponible:3575000 });
+  assert.deepEqual(r.pendientes.map(p => p.fecha), ['2026-11-03', '2026-11-04']);
+  assert.equal(r.pendientes[0].total, 1200000);              // ICBC + préstamos
+  assert.equal(r.pendientes[0].balance, 3575000 - 1200000);
+  assert.equal(r.pendientes[1].acumulado, 1800000);          // + BNA
+  assert.equal(r.totalPendiente, 1800000);
+  assert.equal(r.balance, 3575000 - 1800000);
+  assert.equal(r.proximo.fecha, '2026-11-03');
+});
+
+test('vencimientos: faltante cuando lo disponible no alcanza; los gastos sin fecha no entran', () => {
+  const r = calcularVencimientos({ vencimientos:venc, gastos:gastosOct, mesKey:'2026-10', hoyStr:'2026-10-30', disponible:1000000 });
+  assert.equal(r.proximo.balance, -200000);
+  assert.equal(r.totalPendiente, 1800000);                   // alquiler (sin fecha) no suma
+});
+
+test('vencimientos: los que ya pasaron salen de pendientes y, sin pendientes, vuelve el resultado mensual', () => {
+  const r = calcularVencimientos({ vencimientos:venc, gastos:gastosOct, mesKey:'2026-10', hoyStr:'2026-11-04', disponible:1 });
+  assert.deepEqual(r.pendientes.map(p => p.fecha), ['2026-11-04']);     // vence hoy: todavía cuenta
+  const r2 = calcularVencimientos({ vencimientos:venc, gastos:gastosOct, mesKey:'2026-10', hoyStr:'2026-11-05', disponible:1 });
+  assert.equal(r2.pendientes.length, 0); assert.equal(r2.proximo, null); assert.equal(r2.hayConfigurados, true);
+});
+
+test('vencimientos: cambio de año, día 31 en mes corto y monto 0 sin vencimiento', () => {
+  assert.equal(fechaVencimiento('2026-12', 3, true), '2027-01-03');
+  assert.equal(fechaVencimiento('2026-02', 31, false), '2026-02-28');
+  const r = calcularVencimientos({ vencimientos:{ icbc:{ dia:3, mesSiguiente:false } }, gastos:{ icbc:'0' }, mesKey:'2026-10', hoyStr:'2026-10-01', disponible:0 });
+  assert.equal(r.pendientes.length, 0);
+});
+
+// ── Vehículos ────────────────────────────────────────────────────────
+const vehs = [ { id:'A', marca:'Toyota', modelo:'Etios', patente:'AB123CD', anio:2019 }, { id:'B', marca:'Fiat', modelo:'Cronos', patente:'AC456EF', anio:2021 } ];
+
+test('vehículos: gastos sin asignar van al primero; una asignación se respeta; un vehículo borrado vuelve al primero', () => {
+  const gv = { t2:'B' };
+  assert.equal(vehiculoDeGasto('t1', gv, vehs), 'A');
+  assert.equal(vehiculoDeGasto('t2', gv, vehs), 'B');
+  assert.equal(vehiculoDeGasto('t2', gv, [vehs[0]]), 'A');
+  assert.equal(vehiculoDeGasto('t2', gv, []), null);
+});
+
+test('vehículos: la suma por vehículo coincide con el total de Gastos (sin duplicar ni perder)', () => {
+  const gv = { t2:'B' };
+  const porVeh = id => resumenAutoMeses(zapia, tarj, cats, {}, ['2026-10'], i => vehiculoDeGasto(i.id, gv, vehs) === id).total;
+  const todos = resumenAutoMeses(zapia, tarj, cats, {}, ['2026-10']).total;
+  const A = porVeh('A'), B = porVeh('B');
+  assert.equal(B.mantenimiento, 80000);                       // el taller se imputó al B
+  assert.equal(A.mantenimiento, 0);
+  ['combustible','peajes','mantenimiento','sinClasificar'].forEach(k => assert.equal(A[k] + B[k], todos[k]));
+});
+
+test('categorías de auto reconocidas para pedir vehículo', () => {
+  ['Combustible','Mantenimiento','Peajes/TelePASE','Peajes/Autopistas','Auto'].forEach(c => assert.ok(esCategoriaAuto(c)));
+  assert.equal(esCategoriaAuto('Supermercado'), false);
 });

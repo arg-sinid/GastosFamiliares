@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
 import {
-  n, $$, fmtK, getKey, fmtKey, monthOpts, hoy, uid,
+  n, $$, fmtK, getKey, fmtKey, monthOpts, hoy, uid, fmtDate, calcularVencimientos, VENCIMIENTO_MES_SIGUIENTE_DEFECTO,
   calcularTotalesTarjetas, calcularIngresoGerman, calcularAhorroManual, calcularAhorroAcumulado,
   calcularResultadoMensual, calcularTotalesMes, resolverMes, GASTOS_FIJOS_KEYS,
 } from '../utils.js';
@@ -68,6 +68,81 @@ function AhorroMovimientoRow({ m, onBorrar }) {
   );
 }
 
+
+// Editor del día de vencimiento de un gasto fijo (se repite todos los meses).
+function EditorVencimiento({ valor, defectoSiguiente, onSave, onClear }) {
+  const [dia, setDia] = useState(valor?.dia ? String(valor.dia) : '');
+  const [sig, setSig] = useState(valor ? !!valor.mesSiguiente : !!defectoSiguiente);
+  const ok = n(dia) >= 1 && n(dia) <= 31;
+  return (
+    <div className="px-4 py-2.5 bg-[#FFFBF5] border-b border-border-soft">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs text-muted">📅 Vence el día</span>
+        <input type="number" inputMode="numeric" min="1" max="31" value={dia} onChange={e=>setDia(e.target.value)}
+          className="w-16 px-2 py-1.5 rounded-lg border-[1.5px] border-border text-sm outline-none text-center"/>
+        <label className="flex items-center gap-1.5 text-xs text-muted">
+          <input type="checkbox" checked={sig} onChange={e=>setSig(e.target.checked)}/> del mes siguiente
+        </label>
+      </div>
+      <div className="flex gap-2">
+        {valor && <button onClick={onClear} className="flex-1 py-1.5 border-[1.5px] border-border rounded-lg bg-white text-negative font-semibold text-xs touch-manipulation">Quitar</button>}
+        <button onClick={()=>ok && onSave({ dia:Math.floor(n(dia)), mesSiguiente:sig })} disabled={!ok}
+          className={`flex-[2] py-1.5 border-none rounded-lg text-white font-bold text-xs touch-manipulation ${ok?'bg-accent-strong':'bg-border'}`}>Guardar vencimiento</button>
+      </div>
+      <div className="text-[10px] text-muted-light mt-1">"Mes siguiente": el resumen/cuota de este mes vence el mes que viene (ej.: tarjeta de octubre → 3 de noviembre).</div>
+    </div>
+  );
+}
+
+// Arriba de todo mientras queden vencimientos por pagar: cuánto hay que reunir y si alcanza.
+function VencimientosCard({ venc, hoyStr, etiquetas }) {
+  const dias = f => Math.round((new Date(f+'T12:00:00') - new Date(hoyStr+'T12:00:00')) / 86400000);
+  const txtDias = f => { const d = dias(f); return d === 0 ? 'vence hoy' : d === 1 ? 'mañana' : `en ${d} días`; };
+  const p = venc.proximo, ok = p.balance >= 0;
+  const fd = f => fmtDate(new Date(f+'T12:00:00'));
+  return (
+    <div className={`rounded-2xl overflow-hidden mb-3 border-2 shadow-sm ${ok?'border-[#68D391]':'border-[#FC8181]'}`}>
+      <div className="bg-ink text-white px-4 py-2.5 flex justify-between items-center">
+        <span className="font-bold text-[13px]">📅 Próximo vencimiento · {fd(p.fecha)}</span>
+        <span className="text-[11px] opacity-80">{txtDias(p.fecha)}</span>
+      </div>
+      <div className={`px-4 py-3.5 ${ok?'bg-positive-soft':'bg-negative-soft'}`}>
+        <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Para este vencimiento hace falta reunir</div>
+        <div className="text-[30px] font-extrabold tracking-tight tabular-nums text-ink">{$$(p.acumulado)}</div>
+        <div className="flex justify-between items-center mt-1">
+          <span className="text-xs text-muted">Disponible (sueldo Julieta + saldo Uala): <strong className="tabular-nums">{$$(venc.disponible)}</strong></span>
+        </div>
+        <div className={`mt-2 text-[13px] font-extrabold ${ok?'text-positive':'text-negative'}`}>
+          {ok ? `✓ Alcanza — sobran ${$$(p.balance)}` : `⚠️ Faltan ${$$(Math.abs(p.balance))}`}
+        </div>
+      </div>
+      <div className="bg-white">
+        {venc.pendientes.map((g, i) => (
+          <div key={g.fecha} className={`px-4 py-2.5 ${i>0?'border-t border-border-soft':''}`}>
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-[12px] font-bold text-ink">{fd(g.fecha)} <span className="text-muted-light font-normal">· {txtDias(g.fecha)}</span></span>
+              <span className="text-[12px] font-extrabold text-negative tabular-nums">{$$(g.total)}</span>
+            </div>
+            {g.items.map(it => (
+              <div key={it.key} className="flex justify-between text-[11px] text-muted pl-2">
+                <span>{etiquetas[it.key] || it.key}</span><span className="tabular-nums">{$$(it.monto)}</span>
+              </div>
+            ))}
+            {venc.pendientes.length > 1 && (
+              <div className={`flex justify-between text-[11px] mt-1 pl-2 font-semibold ${g.balance>=0?'text-positive':'text-negative'}`}>
+                <span>Acumulado {$$(g.acumulado)}</span><span>{g.balance>=0 ? `sobran ${$$(g.balance)}` : `faltan ${$$(Math.abs(g.balance))}`}</span>
+              </div>
+            )}
+          </div>
+        ))}
+        <div className="px-4 py-2 bg-paper border-t border-border-soft text-[10px] text-muted-light">
+          Solo cuentan los gastos fijos con vencimiento cargado (📅). Cuando pasen todos, vuelve a verse el resultado mensual.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ControlGastos({ appData, saveData, zapiaData, tarjetasData, syncing, syncStatus, syncMsg, onRetry, onRefresh, usuario, metaAhorro, onOpenSettings, ocultar, onToggleOcultar }) {
   const today      = new Date();
   const currentKey = getKey(today);
@@ -78,6 +153,7 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
   const [savedOk,  setSavedOk]  = useState(false);
   const [edit,     setEdit]     = useState(null);
   const [formAhorro, setFormAhorro] = useState(null);
+  const [editVenc, setEditVenc] = useState(null);
 
   const allData     = appData.monthly            || {};
   const uberDiDi    = appData.uberDiDi           || [];
@@ -106,6 +182,13 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
   const tot        = calcularTotalesMes(mesEdit, germanIncome);
   const ahorroAcum = calcularAhorroAcumulado(ctx, selKey) + calcularAhorroManual(ahorroMovimientos, selKey);
   const meta       = n(metaAhorro);
+  const vencimientos = appData.vencimientos || {};
+  const hoyStr = hoy();
+  // Disponible = ingresos familiares del mes (sueldo de Julieta + saldo de la Uala de Germán).
+  const venc = calcularVencimientos({ vencimientos, gastos: mesEdit.gastos, mesKey: selKey, hoyStr, disponible: tot.ing });
+  const etiquetas = Object.fromEntries(GASTOS_CONFIG.map(g => [g.key, g.label]));
+  const guardarVenc = async (key, v) => { await saveData({ ...appData, vencimientos: { ...vencimientos, [key]: v } }); setEditVenc(null); };
+  const quitarVenc = async (key) => { const nx = { ...vencimientos }; delete nx[key]; await saveData({ ...appData, vencimientos: nx }); setEditVenc(null); };
 
   const updateField = (section, field, value) => {
     setEdit({ key: selKey, data: { ...mesEdit, [section]: { ...mesEdit[section], [field]: value } } });
@@ -196,6 +279,7 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
 
       {tab==='mes' && (
         <>
+          {venc.proximo && <VencimientosCard venc={venc} hoyStr={hoyStr} etiquetas={etiquetas}/>}
           <div className={`rounded-2xl px-5 py-4.5 mb-2 border-2 shadow-sm ${tot.saldo>=0?'bg-positive-soft border-[#68D391]':'bg-negative-soft border-[#FC8181]'}`}>
             <div className="flex justify-between items-start">
               <div>
@@ -263,33 +347,44 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
             {GASTOS_CONFIG.map((g, i) => {
               const isRec  = recurrentes[g.key] !== undefined;
               const fromCard = (g.key==='icbc'||g.key==='bna') && (totalesTarjetas[selKey]?.[g.key] !== undefined);
+              const v = vencimientos[g.key];
               return (
-                <div key={g.key} className={`flex items-center px-3 py-2.5 ${i===GASTOS_CONFIG.length-1?'':'border-b border-border-soft'} ${fromCard?'bg-[#EBF8FF]':isRec?'bg-[#FFFBF5]':''}`}>
-                  <span className="text-base mr-2 min-w-[22px]">{g.icon}</span>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[13px] text-ink font-medium">{g.label}</span>
-                      {fromCard && <span className="text-[10px] bg-[#BEE3F8] text-tab-tarjetas rounded px-1.5 py-0.5 font-bold">💳 de Gastos</span>}
-                      {!fromCard && isRec && <span className="text-[10px] bg-accent-soft text-accent-strong rounded px-1.5 py-0.5 font-bold">🔁 fijo</span>}
-                    </div>
-                    {g.hint && !fromCard && <div className="text-[11px] text-muted-light">{g.hint}</div>}
-                  </div>
-                  {!fromCard && (
-                    <button onClick={() => toggleRecurrente(g.key)} title={isRec?'Quitar recurrente':'Marcar como recurrente'}
-                      className={`border-none rounded-md cursor-pointer text-[13px] px-2 py-1 mr-1.5 touch-manipulation ${isRec?'bg-accent-soft text-accent-strong':'bg-border-soft text-muted-light'}`}>🔁</button>
-                  )}
-                  <div className="flex items-center gap-1">
-                    <span className="text-muted-light text-[13px]">$</span>
-                    {fromCard ? (
-                      <div className="w-[120px] px-2 py-1.5 rounded-lg text-sm text-right border-[1.5px] border-[#90CDF4] bg-[#EBF8FF] text-tab-tarjetas font-bold tabular-nums">
-                        {ocultar ? '••••' : new Intl.NumberFormat('es-AR').format(n(mesEdit.gastos[g.key]))}
+                <div key={g.key}>
+                  <div className={`flex items-center px-3 py-2.5 ${i===GASTOS_CONFIG.length-1 && editVenc!==g.key ?'':'border-b border-border-soft'} ${fromCard?'bg-[#EBF8FF]':isRec?'bg-[#FFFBF5]':''}`}>
+                    <span className="text-base mr-2 min-w-[22px]">{g.icon}</span>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[13px] text-ink font-medium">{g.label}</span>
+                        {fromCard && <span className="text-[10px] bg-[#BEE3F8] text-tab-tarjetas rounded px-1.5 py-0.5 font-bold">💳 de Gastos</span>}
+                        {!fromCard && isRec && <span className="text-[10px] bg-accent-soft text-accent-strong rounded px-1.5 py-0.5 font-bold">🔁 fijo</span>}
                       </div>
-                    ) : (
-                      <MoneyInput width={120} value={mesEdit.gastos[g.key]}
-                        border={`1.5px solid ${isRec?'#E9BE8F':'#E2DDD3'}`}
-                        onChange={v => { updateField('gastos', g.key, v); if(isRec) updateRecurrente(g.key, v); }}/>
+                      {g.hint && !fromCard && <div className="text-[11px] text-muted-light">{g.hint}</div>}
+                    </div>
+                    <button onClick={() => setEditVenc(editVenc===g.key?null:g.key)} title="Fecha de vencimiento"
+                      className={`border-none rounded-md cursor-pointer text-[11px] font-bold px-1.5 py-1 mr-1.5 touch-manipulation ${v?'bg-ink text-white':'bg-border-soft text-muted-light'}`}>
+                      {v ? `📅 ${v.dia}${v.mesSiguiente?'↗':''}` : '📅'}
+                    </button>
+                    {!fromCard && (
+                      <button onClick={() => toggleRecurrente(g.key)} title={isRec?'Quitar recurrente':'Marcar como recurrente'}
+                        className={`border-none rounded-md cursor-pointer text-[13px] px-2 py-1 mr-1.5 touch-manipulation ${isRec?'bg-accent-soft text-accent-strong':'bg-border-soft text-muted-light'}`}>🔁</button>
                     )}
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-light text-[13px]">$</span>
+                      {fromCard ? (
+                        <div className="w-[110px] px-2 py-1.5 rounded-lg text-sm text-right border-[1.5px] border-[#90CDF4] bg-[#EBF8FF] text-tab-tarjetas font-bold tabular-nums">
+                          {ocultar ? '••••' : new Intl.NumberFormat('es-AR').format(n(mesEdit.gastos[g.key]))}
+                        </div>
+                      ) : (
+                        <MoneyInput width={110} value={mesEdit.gastos[g.key]}
+                          border={`1.5px solid ${isRec?'#E9BE8F':'#E2DDD3'}`}
+                          onChange={val => { updateField('gastos', g.key, val); if(isRec) updateRecurrente(g.key, val); }}/>
+                      )}
+                    </div>
                   </div>
+                  {editVenc===g.key && (
+                    <EditorVencimiento valor={v} defectoSiguiente={!!VENCIMIENTO_MES_SIGUIENTE_DEFECTO[g.key]}
+                      onSave={val => guardarVenc(g.key, val)} onClear={() => quitarVenc(g.key)}/>
+                  )}
                 </div>
               );
             })}

@@ -113,3 +113,27 @@ export function CategoriaModal({ subtitulo, categorias, onSelect, onClose }) {
     </div>
   );
 }
+
+// Elegir a qué vehículo se imputa un gasto del auto. onSelect recibe el id del vehículo.
+export function VehiculoModal({ subtitulo, vehiculos, onSelect, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[310] flex items-end justify-center">
+      <div className="bg-white rounded-t-[20px] px-4 pt-5 pb-8 w-full max-w-[500px] max-h-[80vh] overflow-y-auto">
+        <div className="font-extrabold text-base mb-1 text-ink">¿A qué vehículo corresponde?</div>
+        <div className="text-[13px] text-muted mb-4">{subtitulo}</div>
+        <div className="flex flex-col gap-2 mb-3">
+          {vehiculos.map(v => (
+            <button key={v.id} onClick={() => onSelect(v.id)}
+              className="px-3 py-3 border-[1.5px] border-border rounded-lg cursor-pointer bg-[#FAFAFA] text-left text-[13px] font-semibold text-ink flex items-center gap-2 touch-manipulation">
+              <span className="text-xl">🚗</span>
+              <span className="flex-1">{v.marca} {v.modelo}</span>
+              <span className="text-[11px] text-muted font-mono">{v.patente}</span>
+            </button>
+          ))}
+        </div>
+        <button onClick={onClose}
+          className="w-full p-3 border-[1.5px] border-border rounded-lg bg-white cursor-pointer font-semibold text-muted text-sm touch-manipulation">Cancelar</button>
+      </div>
+    </div>
+  );
+}

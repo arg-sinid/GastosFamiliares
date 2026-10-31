@@ -130,3 +130,13 @@ test('adoptarServidor no pisa cambios pendientes', async () => {
   assert.equal(E.adoptarServidor({ version:99, data:data() }).aplicado, false);
   assert.ok(deepEqual(normalizarAppData(E.mine), normalizarAppData({ ...EMPTY_DATA(), uberDiDi:[] })));
 });
+
+test('dos celulares agregan vehículos distintos y asignan gastos: quedan los dos vehículos y las dos asignaciones', () => {
+  const base = data({ vehiculos:[{ id:'A', marca:'Toyota' }], gastoVehiculo:{}, vencimientos:{} });
+  const mine = data({ vehiculos:[{ id:'B', marca:'Fiat' }, { id:'A', marca:'Toyota' }], gastoVehiculo:{ g1:'B' }, vencimientos:{ icbc:{ dia:3, mesSiguiente:true } } });
+  const theirs = data({ vehiculos:[{ id:'C', marca:'Renault' }, { id:'A', marca:'Toyota' }], gastoVehiculo:{ g2:'C' }, vencimientos:{ bna:{ dia:4, mesSiguiente:true } } });
+  const out = mergeAppData(base, mine, theirs);
+  assert.deepEqual(out.vehiculos.map(v => v.id).sort(), ['A','B','C']);
+  assert.deepEqual(out.gastoVehiculo, { g1:'B', g2:'C' });
+  assert.deepEqual(Object.keys(out.vencimientos).sort(), ['bna','icbc']);
+});

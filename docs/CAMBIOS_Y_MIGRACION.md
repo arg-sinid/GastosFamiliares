@@ -15,7 +15,7 @@
 - Campo nuevo `autoDetalle` (detalle de mantenimiento): arranca vacío, no toca datos viejos.
 
 ## Reglas de negocio aplicadas (confirmadas por Germán)
-- Ingreso de Germán en Principal = lo que se junta en la Uala = diferencia entre saldos reales consecutivos; mes abierto = estimación (transferencias + depósito − gastos de Julieta desde el último saldo real).
+- Ingreso de Germán en Principal = saldo de la Uala: en el mes de la última carga de Julieta es ese saldo declarado + transferencias/depósito − gastos de Julieta posteriores a la carga (la diferencia de conciliación NO se resta). Meses ya cerrados: suba del saldo entre cargas (pendiente de decidir).
 - Saldo esperado = saldo real anterior + transferencias de domingos + depósito de fin de mes − gastos de Zapia de Julieta (efectivo y transferencia).
 - Diferencia = real − esperado. Negativa = gasto hormiga, positiva = sobrante. Solo control: nunca se resta del resultado.
 - Germán: bruto Uber/DiDi vs (sus gastos de Zapia + girado/depositado a Uala + efectivo que queda). Misma convención de signo.
@@ -24,11 +24,11 @@
 - "Cierre económico" (ex Cierre Real) es otro indicador, con otro nombre: bruto del auto − todos los gastos.
 
 ## Cambios de comportamiento que van a mover números
-1. **Mes abierto de Germán**: antes mostraba el saldo absoluto de Julieta; ahora la diferencia (flujo). Es el cambio más visible.
+1. **Mes abierto de Germán**: muestra el saldo declarado (corregido en v5.1; en v5.0 mostraba la suba del saldo).
 2. **Depósito de fin de mes**: ya no se suma aparte (estaba contado dos veces).
 3. **Gastos de Julieta**: ahora restan efectivo Y transferencia (antes solo transferencia).
 4. **Hormiga**: ya no se recorta en 0; puede ser negativa o positiva.
-5. **Ingreso de Germán puede ser negativo** en un mes (si Julieta gastó de lo ahorrado). Para volver al piso en 0: `Math.max(0, …)` en `calcularIngresoGerman`.
+5. En meses cerrados la suba del saldo puede ser negativa (ya no se recorta en 0).
 6. **Hoja Control** y **Principal** usan ahora el mismo cálculo (antes la hoja usaba los valores manuales de tarjeta por un bug de closure).
 7. **Categorías**: se agregan Combustible, Mantenimiento y Peajes/TelePASE. Las compras de tarjeta sin categoría guardada se clasifican al vuelo, así que lo que antes caía en "Auto" ahora cae en la categoría fina (montos y totales NO cambian). Lo ya guardado por vos en categorías no se toca; lo que quedó en "Auto" aparece en Auto → "por clasificar".
 8. Palabras cortas ("pan", "dia") ahora coinciden solo como palabra completa (pantalon ≠ pan).
@@ -45,3 +45,13 @@ Sacá captura de Principal (Historial) de los últimos meses ANTES de actualizar
 - Ocultar importes: enmascara textos y gráficos; los campos donde escribís siguen visibles.
 - No se ejecutó `vite build` en mi entorno (sin red): correr `npm run build` en Termux.
 - Seguridad: la URL del Apps Script sigue siendo el único secreto.
+
+## v5.2 — Vencimientos y varios vehículos
+**Datos nuevos** (arrancan vacíos, no tocan nada existente): `vencimientos` (clave del fijo → `{dia, mesSiguiente}`), `vehiculos` (id, marca, modelo, patente, año) y `gastoVehiculo` (id del gasto → id del vehículo).
+- **Vencimientos:** cada gasto fijo tiene un botón 📅 para cargar el día de vencimiento (se repite todos los meses). Por defecto ICBC, Banco Nación y Préstamos se marcan "del mes siguiente" (el resumen de octubre vence en noviembre); es editable.
+- **Principal:** mientras queden vencimientos sin pasar, arriba de todo se ve cuánto hace falta reunir para el próximo (y acumulado por fecha) contra lo disponible = sueldo de Julieta + saldo de la Uala. Solo cuentan los fijos con fecha cargada. Cuando pasan todos, la tarjeta desaparece y queda el resultado mensual como siempre (que se sigue viendo debajo mientras tanto).
+- **Vehículos:** en Auto → "Vehículos y gastos" se agregan/editan/quitan vehículos (marca, modelo, patente, año; la patente no se puede repetir). Se elige el vehículo antes de ver el mes.
+- **Imputación:** el gasto se carga una sola vez en Gastos. Al categorizarlo como Combustible, Mantenimiento, Peajes/TelePASE o Auto, si hay más de un vehículo se pregunta a cuál corresponde. También se puede cambiar desde Auto. Los gastos sin asignar (y todos los anteriores) van al primer vehículo.
+- La suma de los vehículos coincide con el total de Gastos. El bruto de Uber/DiDi no se reparte por vehículo, así que la rentabilidad se calcula contra todos los vehículos.
+- El detalle de mantenimiento (km, próximo cambio) y el "último km" son por vehículo.
+- Backend: `apps_script_v6.js` cambió solo en los valores por defecto de los campos nuevos. Actualizarlo es opcional (los datos nuevos se guardan igual).

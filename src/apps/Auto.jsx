@@ -1,8 +1,12 @@
 import { useState } from 'react';
+import { storage } from '../storage.js';
 import {
   n, $$, hoy, getMonday, weekDates, dateStr, fmtDate, uid, esUltimoDiaMes, getKey, fmtKey, monthOpts,
   mesesAtras, agruparGastosPorCategoria, resumenAuto, resumenAutoMeses, brutoUberDiDiMes,
+  vehiculoDeGasto, normPatente,
 } from '../utils.js';
+
+const SK_VEH = 'vehiculo_activo_v1';
 
 const DIAS = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 const TIPOS_TRABAJO = ['Cambio de aceite y filtros','Cubiertas','Reparación','Mantenimiento preventivo','Otro'];
@@ -222,36 +226,121 @@ function DetalleGastoAuto({ item, detalle, onSave, onClear }) {
   );
 }
 
+// Alta / edición de un vehículo: marca, modelo, patente y año.
+function FormVehiculo({ inicial, existentes, onSave, onCancel }) {
+  const [f, setF] = useState({ marca:'', modelo:'', patente:'', anio:'', ...(inicial || {}) });
+  const [err, setErr] = useState('');
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const inp = 'w-full px-3 py-2 rounded-lg border-[1.5px] border-border text-sm outline-none bg-white';
+  const guardar = () => {
+    if (!f.marca.trim() || !f.modelo.trim() || !normPatente(f.patente)) { setErr('Completá marca, modelo y patente.'); return; }
+    const anio = f.anio === '' ? '' : Math.floor(n(f.anio));
+    if (anio !== '' && (anio < 1950 || anio > 2100)) { setErr('El año no es válido.'); return; }
+    if (existentes.some(v => v.id !== inicial?.id && normPatente(v.patente) === normPatente(f.patente))) { setErr('Ya hay un vehículo con esa patente.'); return; }
+    onSave({ id: inicial?.id || uid(), marca: f.marca.trim(), modelo: f.modelo.trim(), patente: normPatente(f.patente), anio });
+  };
+  return (
+    <div className="bg-white rounded-2xl p-4 mb-3.5 shadow-sm border-[1.5px] border-tab-ganancias">
+      <div className="text-[13px] font-extrabold text-tab-ganancias mb-3">{inicial ? '✏️ Editar vehículo' : '➕ Nuevo vehículo'}</div>
+      <div className="flex gap-2 mb-2">
+        <input placeholder="Marca" value={f.marca} onChange={e=>set('marca', e.target.value)} className={inp}/>
+        <input placeholder="Modelo" value={f.modelo} onChange={e=>set('modelo', e.target.value)} className={inp}/>
+      </div>
+      <div className="flex gap-2 mb-2">
+        <input placeholder="Patente" value={f.patente} onChange={e=>set('patente', e.target.value.toUpperCase())} className={inp + ' font-mono'}/>
+        <input placeholder="Año" type="number" inputMode="numeric" value={f.anio} onChange={e=>set('anio', e.target.value)} className={inp}/>
+      </div>
+      {err && <div className="text-[11px] text-negative font-semibold mb-2">{err}</div>}
+      <div className="flex gap-2">
+        {onCancel && <button onClick={onCancel} className="flex-1 py-2 border-[1.5px] border-border rounded-lg bg-white text-muted font-semibold text-xs touch-manipulation">Cancelar</button>}
+        <button onClick={guardar} className="flex-[2] py-2 border-none rounded-lg bg-tab-ganancias text-white font-bold text-xs touch-manipulation">Guardar vehículo</button>
+      </div>
+    </div>
+  );
+}
+
 function GastosAuto({ appData, saveData, zapiaData, tarjetasData, brutoMes, selMes, setSelMes }) {
   const [periodo, setPeriodo] = useState(1);        // meses hacia atrás: 1, 3, 6, 12
   const [abierto, setAbierto] = useState({});
   const [detalleAbierto, setDetalleAbierto] = useState(null);
+  const [selVeh, setSelVeh] = useState(() => storage.get(SK_VEH)?.value || '');
+  const [formVeh, setFormVeh] = useState(null);     // null | 'nuevo' | 'editar'
   const categories = appData.categories || {};
   const dolarMap = appData.dolarTarjeta || {};
   const autoDetalle = appData.autoDetalle || {};
+  const vehiculos = appData.vehiculos || [];
+  const gv = appData.gastoVehiculo || {};
   const meses = mesesAtras(selMes, periodo);
 
+  // Vehículo activo: el elegido, o el primero (a él van los gastos sin asignar).
+  const vehActivo = vehiculos.find(v => v.id === selVeh) || vehiculos[0] || null;
+  const elegir = (id) => { setSelVeh(id); storage.set(SK_VEH, id); };
+  const filtro = vehActivo ? (i => vehiculoDeGasto(i.id, gv, vehiculos) === vehActivo.id) : null;
+
   // Consulta sobre Gastos: mismas funciones, mismos filtros, sin duplicar registros.
-  const porMes = meses.map(mes => resumenAuto(agruparGastosPorCategoria(zapiaData, tarjetasData, categories, dolarMap, mes).grupos));
+  const porMes = meses.map(mes => resumenAuto(agruparGastosPorCategoria(zapiaData, tarjetasData, categories, dolarMap, mes).grupos, filtro));
   const unir = k => porMes.flatMap(r => r[k].items).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   const grupos = ['combustible','peajes','mantenimiento','sinClasificar'].map(k => {
     const items = unir(k);
     return { k, label: porMes[0][k].label, emoji: porMes[0][k].emoji, items, total: items.reduce((s,i)=>s+i.monto,0) };
   });
   const tot = k => grupos.find(g => g.k === k).total;
-  const resumen = resumenAutoMeses(zapiaData, tarjetasData, categories, dolarMap, meses);
-  const mesActual = resumenAutoMeses(zapiaData, tarjetasData, categories, dolarMap, [selMes]).total;
-  const gastosVehiculo = mesActual.combustible + mesActual.peajes + mesActual.mantenimiento;
+  const resumen = resumenAutoMeses(zapiaData, tarjetasData, categories, dolarMap, meses, filtro);
+  // Rentabilidad: el bruto de Uber/DiDi no se reparte por vehículo, así que se compara con TODOS los vehículos.
+  const mesTodos = resumenAutoMeses(zapiaData, tarjetasData, categories, dolarMap, [selMes]).total;
+  const gastosTodos = mesTodos.combustible + mesTodos.peajes + mesTodos.mantenimiento;
 
-  const kms = Object.values(autoDetalle).map(d => n(d.km)).filter(Boolean);
+  // Km y próximo mantenimiento: solo del vehículo activo.
+  const detallesVeh = Object.values(autoDetalle).filter(d => !vehActivo || (d.vehiculoId || vehiculos[0]?.id) === vehActivo.id);
+  const kms = detallesVeh.map(d => n(d.km)).filter(Boolean);
   const ultimoKm = kms.length ? Math.max(...kms) : 0;
-  const proximos = Object.values(autoDetalle).filter(d => n(d.proximoKm) > 0).map(d => n(d.proximoKm)).sort((a,b)=>a-b).find(k => k >= ultimoKm);
+  const proximos = detallesVeh.filter(d => n(d.proximoKm) > 0).map(d => n(d.proximoKm)).sort((a,b)=>a-b).find(k => k >= ultimoKm);
 
-  const guardarDetalle = (id, d) => saveData({ ...appData, autoDetalle: { ...autoDetalle, [id]: d } }).then(() => setDetalleAbierto(null));
+  const guardarDetalle = (id, d) => saveData({ ...appData, autoDetalle: { ...autoDetalle, [id]: { ...d, vehiculoId: vehActivo?.id || '' } } }).then(() => setDetalleAbierto(null));
   const quitarDetalle = (id) => { const nx = { ...autoDetalle }; delete nx[id]; return saveData({ ...appData, autoDetalle: nx }).then(() => setDetalleAbierto(null)); };
+  const asignarVehiculo = (id, vid) => saveData({
+    ...appData, gastoVehiculo: { ...gv, [id]: vid },
+    autoDetalle: autoDetalle[id] ? { ...autoDetalle, [id]: { ...autoDetalle[id], vehiculoId: vid } } : autoDetalle,
+  });
+
+  const guardarVehiculo = async (v) => {
+    const lista = vehiculos.some(x => x.id === v.id) ? vehiculos.map(x => x.id === v.id ? v : x) : [...vehiculos, v];
+    await saveData({ ...appData, vehiculos: lista });
+    elegir(v.id); setFormVeh(null);
+  };
+  const borrarVehiculo = async () => {
+    if (!vehActivo || !window.confirm(`¿Quitar ${vehActivo.marca} ${vehActivo.modelo} (${vehActivo.patente})? Sus gastos no se borran: pasan al primer vehículo.`)) return;
+    const gvNuevo = Object.fromEntries(Object.entries(gv).filter(([,vid]) => vid !== vehActivo.id));
+    await saveData({ ...appData, vehiculos: vehiculos.filter(v => v.id !== vehActivo.id), gastoVehiculo: gvNuevo });
+    setSelVeh('');
+  };
+
+  if (vehiculos.length === 0 || formVeh === 'nuevo') return (
+    <div>
+      <div className="text-[13px] text-muted mb-3">{vehiculos.length === 0 ? 'Cargá tu vehículo para ver y imputar sus gastos. Los que ya tenés en Gastos pasan al primero que cargues.' : ''}</div>
+      <FormVehiculo existentes={vehiculos} onSave={guardarVehiculo} onCancel={vehiculos.length ? () => setFormVeh(null) : null}/>
+    </div>
+  );
 
   return (
     <div>
+      {/* Primero el vehículo, después el mes */}
+      <div className="flex gap-2 overflow-x-auto pb-1 mb-2">
+        {vehiculos.map(v => (
+          <button key={v.id} onClick={()=>elegir(v.id)}
+            className={`shrink-0 px-3 py-2 rounded-xl text-left border-[1.5px] touch-manipulation cursor-pointer ${vehActivo.id===v.id?'bg-tab-ganancias text-white border-tab-ganancias':'bg-white text-ink border-border'}`}>
+            <div className="text-[13px] font-bold">🚗 {v.marca} {v.modelo}</div>
+            <div className={`text-[10px] font-mono ${vehActivo.id===v.id?'opacity-80':'text-muted'}`}>{v.patente}{v.anio ? ` · ${v.anio}` : ''}</div>
+          </button>
+        ))}
+        <button onClick={()=>setFormVeh('nuevo')} className="shrink-0 px-3 py-2 rounded-xl border-2 border-dashed border-border bg-none text-[13px] font-bold text-muted cursor-pointer touch-manipulation">➕ Vehículo</button>
+      </div>
+      <div className="flex gap-2 mb-3">
+        <button onClick={()=>setFormVeh(formVeh==='editar'?null:'editar')} className="border-none bg-border-soft rounded-md cursor-pointer text-[11px] text-muted px-2.5 py-1 touch-manipulation">✏️ Editar</button>
+        <button onClick={borrarVehiculo} className="border-none bg-border-soft rounded-md cursor-pointer text-[11px] text-negative px-2.5 py-1 touch-manipulation">🗑️ Quitar</button>
+      </div>
+      {formVeh === 'editar' && <FormVehiculo inicial={vehActivo} existentes={vehiculos} onSave={guardarVehiculo} onCancel={()=>setFormVeh(null)}/>}
+
       <select value={selMes} onChange={e=>setSelMes(e.target.value)}
         className="w-full px-3.5 py-2.5 rounded-lg border-[1.5px] border-border text-sm mb-2.5 bg-white text-ink font-semibold cursor-pointer">
         {monthOpts(new Date()).map(k=><option key={k} value={k}>{fmtKey(k)}{k===getKey(new Date())?' — actual':''}</option>)}
@@ -263,7 +352,7 @@ function GastosAuto({ appData, saveData, zapiaData, tarjetasData, brutoMes, selM
       </div>
 
       <div className="bg-tab-ganancias text-white rounded-2xl px-5 py-4 mb-3.5 shadow-md">
-        <div className="text-[11px] opacity-80 uppercase font-bold tracking-wide">Gastos del vehículo · {periodo===1?fmtKey(selMes):`últimos ${periodo} meses`}</div>
+        <div className="text-[11px] opacity-80 uppercase font-bold tracking-wide">{vehActivo.marca} {vehActivo.modelo} · {periodo===1?fmtKey(selMes):`últimos ${periodo} meses`}</div>
         <div className="text-[30px] font-extrabold tracking-tight tabular-nums">{$$(tot('combustible')+tot('peajes')+tot('mantenimiento'))}</div>
         <div className="text-[11px] opacity-80 flex gap-3 flex-wrap mt-1">
           <span>⛽ {$$(tot('combustible'))}</span><span>🛣️ {$$(tot('peajes'))}</span><span>🔧 {$$(tot('mantenimiento'))}</span>
@@ -271,10 +360,10 @@ function GastosAuto({ appData, saveData, zapiaData, tarjetasData, brutoMes, selM
       </div>
 
       <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
-        <div className="bg-tab-ganancias text-white px-4 py-2.5 font-bold text-[13px]">🚗 Rentabilidad del vehículo · {fmtKey(selMes)}</div>
-        <div className="flex justify-between px-4 py-2.5 border-b border-border-soft"><span className="text-[13px] text-muted">Ingreso bruto del vehículo (Uber/DiDi)</span><span className="text-[13px] font-bold text-german tabular-nums">{$$(brutoMes)}</span></div>
-        <div className="flex justify-between px-4 py-2.5 border-b border-border-soft"><span className="text-[13px] text-muted">Combustible + peajes + mantenimiento</span><span className="text-[13px] font-bold text-negative tabular-nums">{$$(gastosVehiculo)}</span></div>
-        <div className="flex justify-between px-4 py-2.5 bg-paper"><span className="text-[13px] font-bold text-ink">Queda después del auto</span><span className={`text-base font-extrabold tabular-nums ${brutoMes-gastosVehiculo>=0?'text-positive':'text-negative'}`}>{$$(brutoMes-gastosVehiculo)}</span></div>
+        <div className="bg-tab-ganancias text-white px-4 py-2.5 font-bold text-[13px]">🚗 Rentabilidad · todos los vehículos · {fmtKey(selMes)}</div>
+        <div className="flex justify-between px-4 py-2.5 border-b border-border-soft"><span className="text-[13px] text-muted">Ingreso bruto (Uber/DiDi)</span><span className="text-[13px] font-bold text-german tabular-nums">{$$(brutoMes)}</span></div>
+        <div className="flex justify-between px-4 py-2.5 border-b border-border-soft"><span className="text-[13px] text-muted">Combustible + peajes + mantenimiento</span><span className="text-[13px] font-bold text-negative tabular-nums">{$$(gastosTodos)}</span></div>
+        <div className="flex justify-between px-4 py-2.5 bg-paper"><span className="text-[13px] font-bold text-ink">Queda después del auto</span><span className={`text-base font-extrabold tabular-nums ${brutoMes-gastosTodos>=0?'text-positive':'text-negative'}`}>{$$(brutoMes-gastosTodos)}</span></div>
       </div>
 
       {(ultimoKm > 0 || proximos) && (
@@ -319,6 +408,12 @@ function GastosAuto({ appData, saveData, zapiaData, tarjetasData, brutoMes, selM
                     {autoDetalle[item.id]?.tipo && <span className="bg-positive-soft text-positive rounded px-1.5 py-0.5 font-bold">{autoDetalle[item.id].tipo}</span>}
                     {autoDetalle[item.id]?.km ? <span>{new Intl.NumberFormat('es-AR').format(autoDetalle[item.id].km)} km</span> : null}
                     <button onClick={()=>setDetalleAbierto(detalleAbierto===item.id?null:item.id)} className="border-none bg-border-soft rounded-md cursor-pointer text-[10px] text-muted px-1.5 py-0.5 font-semibold touch-manipulation">{autoDetalle[item.id]?'📝 ver / editar':'➕ detalle'}</button>
+                    {vehiculos.length > 1 && (
+                      <select value={vehActivo.id} onChange={e=>asignarVehiculo(item.id, e.target.value)}
+                        className="border-none bg-border-soft rounded-md text-[10px] text-muted px-1 py-0.5 font-semibold">
+                        {vehiculos.map(v => <option key={v.id} value={v.id}>🚗 {v.patente}</option>)}
+                      </select>
+                    )}
                   </div>
                 </div>
                 <span className="font-bold text-[13px] text-tab-ganancias tabular-nums">{$$(item.monto)}</span>
@@ -342,11 +437,11 @@ export default function Auto({ appData, saveData, zapiaData, tarjetasData, onRef
   return (
     <div className="max-w-[480px] mx-auto p-4 bg-positive-soft min-h-[calc(100vh-70px)] overflow-y-auto">
       <div className="bg-tab-ganancias rounded-2xl px-5 py-4.5 mb-4 text-white shadow-md flex justify-between items-center">
-        <div><div className="text-xl font-extrabold">🚗 Auto</div><div className="text-xs opacity-75 mt-0.5">Ganancias · combustible · peajes · mantenimiento</div></div>
+        <div><div className="text-xl font-extrabold">🚗 Auto</div><div className="text-xs opacity-75 mt-0.5">Ganancias · vehículos · combustible · peajes · mantenimiento</div></div>
         <button onClick={handleRefresh} disabled={refreshing} className="bg-white/15 border border-white/30 rounded-lg text-white px-2.5 py-1.5 cursor-pointer text-xs font-bold touch-manipulation">{refreshing ? '...' : '↻'}</button>
       </div>
       <div className="flex bg-border-soft rounded-xl p-1 mb-3.5 gap-0.5">
-        {[['ganancias','💵 Ganancias'],['gastos','🔧 Gastos del auto']].map(([k,l])=>(
+        {[['ganancias','💵 Ganancias'],['gastos','🔧 Vehículos y gastos']].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)} className={`flex-1 py-2.5 border-none rounded-lg cursor-pointer font-bold text-xs touch-manipulation ${tab===k?'bg-white text-tab-ganancias shadow-sm':'bg-transparent text-muted'}`}>{l}</button>
         ))}
       </div>

@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import {
   $$, n, fmtK, getKey, fmtKey, getMonday, weekDates, dateStr, fmtDate, monthOpts,
-  itemsDelMes, itemsDeLaSemana, agruparItems, montoEnPesos, calcularTotalesTarjetas, resolverMes,
+  itemsDelMes, itemsDeLaSemana, agruparItems, calcularTotalesTarjetas, resolverMes, esCategoriaAuto,
 } from '../utils.js';
 import {
   categorizarNuevos, emojiCorrectoParaCategoria, TIPOS_FINANCIEROS,
 } from '../categorias.js';
-import { Skeleton, CategoriaModal } from '../components/ui.jsx';
+import { Skeleton, CategoriaModal, VehiculoModal } from '../components/ui.jsx';
 
 // Los charts de recharts necesitan hex reales (no clases).
 const TARJETAS_CONFIG = {
@@ -204,6 +204,8 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
   const [expanded,  setExpanded]  = useState({});
   const [editKeys,  setEditKeys]  = useState(null);      // claves (comercio/descripcion) a recategorizar
   const [editLabel, setEditLabel] = useState('');
+  const [editIds,   setEditIds]   = useState([]);
+  const [pendVeh,   setPendVeh]   = useState(null);     // { cat, keys, ids, label } esperando elegir vehículo
   const [showEditCats, setShowEditCats] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -213,6 +215,7 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
   const [reparando, setReparando] = useState(false);
 
   const categories = appData.categories || {};
+  const vehiculos  = appData.vehiculos || [];
   const dolarMap   = appData.dolarTarjeta || {};
   const dolarMes   = n(dolarMap[selMes]) || 0;
 
@@ -246,12 +249,30 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
   const fijos = resolverMes(appData.monthly || {}, appData.gastosRecurrentes || {}, totalesTarjetas, selMes).gastos;
   const FIJOS = [['prestamos','🏦 Préstamos'],['nicolas','👤 Nicolás'],['segundo','👤 Segundo'],['alquiler','🏠 Alquiler']].filter(([k]) => n(fijos[k]) > 0);
 
-  const pedirCategoria = (keys, label) => { setEditKeys(keys); setEditLabel(label); };
-  const recategorizar = async (cat) => {
-    const updates = {}; editKeys.forEach(k => { updates[k] = cat; });
-    setEditKeys(null);
-    await saveData({ ...appData, categories: { ...categories, ...updates } });
+  const pedirCategoria = (keys, label, ids = []) => { setEditKeys(keys); setEditLabel(label); setEditIds(ids); };
+
+  // Guarda la categoría y, si es del auto, a qué vehículo se imputa cada gasto elegido.
+  // El gasto sigue siendo uno solo: acá solo se anota la imputación (gastoVehiculo).
+  const aplicarCategoria = async (keys, cat, ids, vehiculoId) => {
+    const updates = {}; keys.forEach(k => { updates[k] = cat; });
+    const next = { ...appData, categories: { ...categories, ...updates } };
+    if (vehiculoId && ids.length) {
+      next.gastoVehiculo = { ...(appData.gastoVehiculo || {}) };
+      next.autoDetalle = { ...(appData.autoDetalle || {}) };
+      ids.forEach(id => { next.gastoVehiculo[id] = vehiculoId; if (next.autoDetalle[id]) next.autoDetalle[id] = { ...next.autoDetalle[id], vehiculoId }; });
+    }
+    await saveData(next);
     setSelectionMode(false); setSelected(new Set());
+  };
+  const recategorizar = async (cat) => {
+    const keys = editKeys, ids = editIds, label = editLabel;
+    setEditKeys(null);
+    if (esCategoriaAuto(cat.categoria) && vehiculos.length > 1) { setPendVeh({ cat, keys, ids, label }); return; }
+    await aplicarCategoria(keys, cat, ids, null);
+  };
+  const elegirVehiculo = async (vehiculoId) => {
+    const { cat, keys, ids } = pendVeh; setPendVeh(null);
+    await aplicarCategoria(keys, cat, ids, vehiculoId);
   };
   const guardarCategorias = async (newCats) => { await saveData({ ...appData, categories: newCats }); };
 
@@ -279,6 +300,7 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
 
   const modales = (
     <>
+      {pendVeh && <VehiculoModal subtitulo={`${pendVeh.label} → ${pendVeh.cat.emoji} ${pendVeh.cat.categoria}`} vehiculos={vehiculos} onSelect={elegirVehiculo} onClose={()=>setPendVeh(null)}/>}
       {editKeys && <CategoriaModal subtitulo={editLabel} categorias={categories} onSelect={recategorizar} onClose={()=>setEditKeys(null)}/>}
       {showEditCats && <EditCatModal categorias={categories} onSave={guardarCategorias} onClose={()=>setShowEditCats(false)}/>}
     </>
@@ -289,7 +311,7 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
     const movs = itemsDelMes([], tarjetasData, dolarMap, selMes).filter(m => m.tarjeta === selTarjeta);
     return <>
       <DetalleTarjeta items={movs} config={TARJETAS_CONFIG[selTarjeta]} categorias={categories}
-        onEditar={m => pedirCategoria([m.key], `"${m.key}"`)} onBack={()=>setSelTarjeta(null)}/>
+        onEditar={m => pedirCategoria([m.key], `"${m.key}"`, [m.id])} onBack={()=>setSelTarjeta(null)}/>
       {modales}
     </>;
   }
@@ -421,7 +443,7 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
                           {item.tipoMovimiento && TIPOS_FINANCIEROS.includes(item.tipoMovimiento) && <span className="text-[10px] bg-orange-100 text-tab-gastos rounded px-1.5 py-0.5 font-bold">{item.tipoMovimiento}</span>}
                         </>)}
                         <span>{fmtFechaCorta(item.fecha)}</span>
-                        {!selectionMode && <button onClick={()=>pedirCategoria([item.key], `"${item.key}"`)}
+                        {!selectionMode && <button onClick={()=>pedirCategoria([item.key], `"${item.key}"`, [item.id])}
                           className="border-none bg-border-soft rounded-md cursor-pointer text-[10px] text-muted px-1.5 py-0.5 font-semibold touch-manipulation">✏️ cambiar</button>}
                       </div>
                     </div>
@@ -438,7 +460,7 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
             <div className="bg-ink rounded-2xl px-3 py-2.5 flex items-center gap-2.5 shadow-lg w-full max-w-[500px]">
               <span className="text-white text-[13px] font-bold flex-1">{selected.size} seleccionado{selected.size>1?'s':''}</span>
               <button onClick={()=>setSelected(new Set())} className="border-none bg-white/15 rounded-lg text-white px-3 py-2 cursor-pointer text-xs font-semibold touch-manipulation">Limpiar</button>
-              <button onClick={()=>pedirCategoria([...new Set(selectedItems.map(i=>i.key))], `${selectedItems.length} gastos seleccionados`)}
+              <button onClick={()=>pedirCategoria([...new Set(selectedItems.map(i=>i.key))], `${selectedItems.length} gastos seleccionados`, selectedItems.map(i=>i.id))}
                 className="border-none bg-tab-gastos rounded-lg text-white px-3.5 py-2 cursor-pointer text-xs font-bold touch-manipulation">🏷️ Asignar categoría</button>
             </div>
           </div>

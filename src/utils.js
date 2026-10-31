@@ -49,6 +49,7 @@ export const mesesAtras = (mesKey, cantidad) => {
 export const EMPTY_DATA = () => ({
   monthly:{}, categories:{}, uberDiDi:[], gastosRecurrentes:{},
   saldoJulieta:{}, dolarTarjeta:{}, ahorroMovimientos:[], autoDetalle:{},
+  vencimientos:{}, vehiculos:[], gastoVehiculo:{},
 });
 export const normalizarAppData = (d) => {
   const e = EMPTY_DATA(), x = d || {};
@@ -57,6 +58,7 @@ export const normalizarAppData = (d) => {
     gastosRecurrentes: x.gastosRecurrentes||e.gastosRecurrentes, saldoJulieta: x.saldoJulieta||e.saldoJulieta,
     dolarTarjeta: x.dolarTarjeta||e.dolarTarjeta, ahorroMovimientos: x.ahorroMovimientos||e.ahorroMovimientos,
     autoDetalle: x.autoDetalle||e.autoDetalle,
+    vencimientos: x.vencimientos||e.vencimientos, vehiculos: x.vehiculos||e.vehiculos, gastoVehiculo: x.gastoVehiculo||e.gastoVehiculo,
   };
 };
 
@@ -216,18 +218,18 @@ export const agruparGastosPorCategoria = (zapiaData, tarjetasData, categories, d
 };
 
 // ── Auto: consulta sobre Gastos (no guarda gastos propios) ─────────
-export const resumenAuto = (grupos) => {
+export const resumenAuto = (grupos, filtro = null) => {
   const out = {};
   Object.entries(GRUPOS_AUTO).forEach(([k, g]) => {
-    const items = g.categorias.flatMap(c => grupos[c]?.items || []);
+    const items = g.categorias.flatMap(c => grupos[c]?.items || []).filter(i => !filtro || filtro(i));
     out[k] = { ...g, items, total: items.reduce((s,i)=>s+i.monto,0) };
   });
   return out;
 };
-export const resumenAutoMeses = (zapiaData, tarjetasData, categories, dolarMap, meses) => {
+export const resumenAutoMeses = (zapiaData, tarjetasData, categories, dolarMap, meses, filtro = null) => {
   const porMes = meses.map(mes => {
     const { grupos } = agruparGastosPorCategoria(zapiaData, tarjetasData, categories, dolarMap, mes);
-    const r = resumenAuto(grupos);
+    const r = resumenAuto(grupos, filtro);
     return { mes, combustible:r.combustible.total, peajes:r.peajes.total, mantenimiento:r.mantenimiento.total, sinClasificar:r.sinClasificar.total };
   });
   const tot = porMes.reduce((a,m)=>({
@@ -302,3 +304,50 @@ export const calcularGastosFijosSinTarjetas = (monthly, gastosRecurrentes, mesKe
   const g = resolverMes(monthly, gastosRecurrentes, {}, mesKey).gastos;
   return GASTOS_FIJOS_KEYS.filter(k => k !== 'icbc' && k !== 'bna').reduce((s,k) => s + n(g[k]), 0);
 };
+
+// ── Vencimientos de gastos fijos ────────────────────────────────────
+// vencimientos[clave] = { dia, mesSiguiente }. El monto es el del mes que se está mirando
+// (las tarjetas: total del resumen de ese mes). "mesSiguiente" = vence el mes siguiente
+// (p. ej. resumen de octubre que vence el 3/11).
+export const VENCIMIENTO_MES_SIGUIENTE_DEFECTO = { icbc:true, bna:true, prestamos:true };
+const ultimoDiaDelMes = (y, m) => new Date(y, m, 0).getDate();
+export const fechaVencimiento = (mesKey, dia, mesSiguiente) => {
+  let [y, m] = mesKey.split('-').map(Number);
+  if (mesSiguiente) { m += 1; if (m > 12) { m = 1; y += 1; } }
+  const d = Math.min(Math.max(1, Math.floor(n(dia))), ultimoDiaDelMes(y, m));
+  return `${y}-${pad(m)}-${pad(d)}`;
+};
+// Cuánto hay que reunir para cada vencimiento que todavía no pasó, acumulado, contra lo disponible.
+// "Disponible" lo define quien llama (en Principal: sueldo de Julieta + saldo de la Uala de Germán).
+export const calcularVencimientos = ({ vencimientos, gastos, mesKey, hoyStr, disponible }) => {
+  const porFecha = {};
+  GASTOS_FIJOS_KEYS.forEach(key => {
+    const v = vencimientos?.[key], monto = n(gastos?.[key]);
+    if (!v || !n(v.dia) || monto <= 0) return;
+    const fecha = fechaVencimiento(mesKey, v.dia, !!v.mesSiguiente);
+    (porFecha[fecha] = porFecha[fecha] || []).push({ key, monto });
+  });
+  const grupos = Object.keys(porFecha).sort().map(fecha => ({
+    fecha, items: porFecha[fecha], total: porFecha[fecha].reduce((s,i) => s + i.monto, 0),
+  }));
+  let acumulado = 0;
+  const pendientes = grupos.filter(g => g.fecha >= hoyStr).map(g => {
+    acumulado += g.total;
+    return { ...g, acumulado, balance: disponible - acumulado };
+  });
+  return {
+    pendientes, vencidos: grupos.filter(g => g.fecha < hoyStr), proximo: pendientes[0] || null,
+    totalPendiente: acumulado, disponible, balance: disponible - acumulado, hayConfigurados: grupos.length > 0,
+  };
+};
+
+// ── Vehículos ───────────────────────────────────────────────────────
+// gastoVehiculo[idGasto] = idVehiculo. El gasto se carga UNA vez en Gastos; esto solo lo imputa.
+// Los gastos sin asignar (y los de un vehículo borrado) van al primer vehículo.
+export const normPatente = p => String(p||'').toUpperCase().replace(/[^A-Z0-9]/g, '');
+export const vehiculoDeGasto = (gastoId, gastoVehiculo, vehiculos) => {
+  const v = gastoVehiculo?.[gastoId];
+  if (v && (vehiculos||[]).some(x => x.id === v)) return v;
+  return vehiculos?.[0]?.id || null;
+};
+export const esCategoriaAuto = (categoria) => Object.values(GRUPOS_AUTO).some(g => g.categorias.includes(categoria));
