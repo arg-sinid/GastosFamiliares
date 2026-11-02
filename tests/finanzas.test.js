@@ -5,7 +5,7 @@ import {
   calcularResultadoMensual, calcularTotalesTarjetas, dedupePorId, itemsDelMes, itemsDeLaSemana,
   agruparGastosPorCategoria, agruparItems, resumenAuto, calcularFilasControl, calcularAhorroAcumulado,
   weekDates, getMonday, dateStr, hoy, calcularAhorroManual,
-  calcularVencimientos, fechaVencimiento, vehiculoDeGasto, esCategoriaAuto, resumenAutoMeses,
+  ultimoSaldoDelMes, repartirFijos, calcularTotalesMes, calcularVencimientos, fechaVencimiento, vehiculoDeGasto, esCategoriaAuto, resumenAutoMeses,
 } from '../src/utils.js';
 import { categorizarUno } from '../src/categorias.js';
 
@@ -54,8 +54,8 @@ test('depósito de fin de mes: cuenta una sola vez (en el esperado) y no se suma
   assert.equal(p.deposito, 20000);
   assert.equal(p.esperado, 160000);
   assert.equal(p.diferencia, 0);                      // antes del arreglo habría dado +20k de "sobrante"
-  assert.equal(calcularIngresoGerman(u, '2026-11', [], s, '2026-11-02'), 160000); // saldo declarado, sin sumar el depósito de nuevo
-  assert.equal(calcularIngresoGerman(u, '2026-10', [], s, '2026-11-02'), 0);       // octubre: ninguna carga cerró en el mes
+  assert.equal(calcularIngresoGerman(s, '2026-11'), 160000); // saldo declarado, sin sumar el depósito de nuevo
+  assert.equal(calcularIngresoGerman(s, '2026-10'), 100000); // octubre: su último saldo declarado, tal cual
 });
 
 test('11. los gastos se asignan al período correcto entre dos conciliaciones', () => {
@@ -66,15 +66,13 @@ test('11. los gastos se asignan al período correcto entre dos conciliaciones', 
   assert.equal(p2.gastosJulieta, 444);         // (11, 18]
 });
 
-test('ingreso de Germán: mes con la última carga = saldo declarado + movimientos posteriores', () => {
+test('ingreso de Germán = saldo declarado TAL CUAL: no suma transferencias ni resta gastos posteriores', () => {
   const z = [ zap('2026-10-13','Julieta',5000) ];
   const u = [ uber('2026-10-11',{ transferencia:50000 }), uber('2026-10-18',{ transferencia:40000 }) ];
-  // Con hoy=20/10 el período abierto (desde el 11) estima 40.000 − 5.000
-  assert.equal(calcularPeriodoAbierto(saldos, u, z, '2026-10-20').ingresoEstimado, 35000);
-  // último saldo declarado 11/10 = 130k; después: +40k transferido −5k gastos
-  assert.equal(calcularIngresoGerman(u, '2026-10', z, saldos, '2026-10-20'), 130000 + 40000 - 5000);
-  // Meses futuros: nada
-  assert.equal(calcularIngresoGerman(u, '2026-12', z, saldos, '2026-10-20'), 0);
+  assert.equal(calcularIngresoGerman(saldos, '2026-10'), 130000);                 // último saldo declarado del mes
+  assert.equal(ultimoSaldoDelMes(saldos, '2026-10').fecha, '2026-10-11');
+  assert.equal(calcularIngresoGerman(saldos, '2026-11'), 0);                      // mes nuevo sin declarar
+  assert.equal(calcularResultadoMensual({ monthly:{ '2026-10':{ ingresos:{julieta:'0'}, gastos:{} } }, gastosRecurrentes:{}, totalesTarjetas:{}, uberDiDi:u, zapiaData:z, saldoJulieta:saldos }, '2026-10').germanIncome, 130000);
 });
 
 test('7. sueldo de Julieta distinto en dos meses consecutivos', () => {
@@ -177,17 +175,30 @@ test('ahorro acumulado no suma meses con saldo negativo', () => {
   assert.equal(calcularAhorroAcumulado(ctx, '2026-12'), 400);
 });
 
-test('caso real: saldo declarado 600.000 el domingo 25/10 → Principal muestra 600.000 aunque haya diferencia de conciliación', () => {
+test('caso real: saldo declarado 600.000 el domingo 25/10 → Principal muestra 600.000 aunque haya diferencia y movimientos después', () => {
   const s = { '2026-09-27':425000, '2026-10-18':520000, '2026-10-25':600000 };
-  const u = [ uber('2026-10-25',{ transferencia:150000 }) ];
-  const z = [ zap('2026-10-20','Julieta',30000) ];     // esperado 520+150−30 = 640k ⇒ diferencia −40k (hormiga)
-  const [, p] = calcularConciliaciones(s, u, z);
-  assert.equal(p.diferencia, -40000);
-  assert.equal(calcularIngresoGerman(u, '2026-10', z, s, '2026-10-26'), 600000);
-  // después del domingo: se suman solo los movimientos nuevos
-  const u2 = [...u, uber('2026-10-26',{ transferencia:10000 })];
-  const z2 = [...z, zap('2026-10-27','Julieta',4000,'efectivo')];
-  assert.equal(calcularIngresoGerman(u2, '2026-10', z2, s, '2026-10-28'), 600000 + 10000 - 4000);
+  const u = [ uber('2026-10-25',{ transferencia:150000 }), uber('2026-10-26',{ transferencia:10000 }) ];
+  const z = [ zap('2026-10-20','Julieta',30000), zap('2026-10-27','Julieta',4000,'efectivo') ];
+  const [, p] = calcularConciliaciones(s, u.slice(0,1), z.slice(0,1));
+  assert.equal(p.diferencia, -40000);                       // hormiga: se informa en Control, no se resta
+  assert.equal(calcularIngresoGerman(s, '2026-10'), 600000); // exacto
+});
+
+test('mes nuevo: los fijos se restan primero del sueldo de Julieta y el resto de la Uala (puede quedar negativo hasta declarar)', () => {
+  const r = repartirFijos({ sueldo:1600000, fijos:2500000, saldoUala:0 });
+  assert.equal(r.deJulieta, 1600000); assert.equal(r.deUala, 900000);
+  assert.equal(r.julietaDespues, 0);  assert.equal(r.ualaDespues, -900000);
+  const holgado = repartirFijos({ sueldo:3000000, fijos:2500000, saldoUala:0 });
+  assert.equal(holgado.deUala, 0); assert.equal(holgado.julietaDespues, 500000);
+  // el reparto no cambia el resultado: julieta + uala después = ingresos − fijos
+  const decl = repartirFijos({ sueldo:1600000, fijos:2500000, saldoUala:1100000 });
+  assert.equal(decl.julietaDespues + decl.ualaDespues, 1600000 + 1100000 - 2500000);
+});
+
+test('la deuda del mes anterior ya no se arrastra como dato: se ignora', () => {
+  const mes = { ingresos:{ julieta:'1000' }, gastos:{ alquiler:'400' }, deuda_anterior: 99999 };
+  const t = calcularTotalesMes(mes, 200);
+  assert.equal(t.egresos, 400); assert.equal(t.saldo, 800); assert.equal(t.deuda, 0);
 });
 
 // ── Vencimientos ─────────────────────────────────────────────────────

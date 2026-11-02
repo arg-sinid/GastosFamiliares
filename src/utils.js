@@ -131,22 +131,23 @@ export const calcularPeriodoAbierto = (saldoJulieta, uberDiDi, zapiaData, hoyStr
   };
 };
 
-// Ingreso de Germán en Principal = el saldo de la Uala.
-// · Mes donde está la ÚLTIMA carga de saldo real de Julieta: ese saldo declarado ES el dato
-//   (no se le resta la diferencia de conciliación: es plata que ya se gastó sin registrar y el
-//   saldo declarado ya la refleja). Se le suman SOLO los movimientos posteriores a esa carga:
-//   transferencias + depósito de fin de mes − gastos de Julieta en Zapia (efectivo y transferencia).
-// · Meses anteriores ya cerrados: se mantiene la lógica histórica (suba del saldo entre cargas
-//   cuyo cierre cae en el mes). Pendiente de decidir si también deben mostrar el saldo declarado.
-export const calcularIngresoGerman = (uberDiDi, mesKey, zapiaData, saldoJulieta, hoyStr = hoy()) => {
-  const fechas = Object.keys(saldoJulieta||{}).sort();
-  const ultima = fechas.length ? fechas[fechas.length-1] : null;
-  if (ultima && ultima.slice(0,7) === mesKey) {
-    return calcularPeriodoAbierto(saldoJulieta, uberDiDi, zapiaData, hoyStr).saldoEstimado;
-  }
-  return calcularConciliaciones(saldoJulieta, uberDiDi, zapiaData)
-    .filter(p => p.fechaFin.slice(0,7) === mesKey)
-    .reduce((s,p) => s + p.ingresoGerman, 0);
+// Ingreso de Germán en Principal = el saldo de la Uala TAL CUAL lo declara Julieta.
+// Es el último saldo real cargado dentro del mes: sin sumar transferencias, sin restar gastos de
+// Zapia (salen de ese mismo saldo) y sin restar la diferencia de conciliación. Si en el mes todavía
+// no declaró ninguno, no hay dato (0) hasta el próximo domingo.
+export const ultimoSaldoDelMes = (saldoJulieta, mesKey) => {
+  const f = Object.keys(saldoJulieta||{}).filter(k => k.slice(0,7) === mesKey).sort();
+  return f.length ? { fecha: f[f.length-1], valor: n(saldoJulieta[f[f.length-1]]) } : null;
+};
+export const calcularIngresoGerman = (saldoJulieta, mesKey) => ultimoSaldoDelMes(saldoJulieta, mesKey)?.valor ?? 0;
+
+// Cómo se cubren los gastos fijos: primero con el sueldo de Julieta y lo que falte sale del saldo de
+// la Uala de Germán, que puede quedar negativo hasta que Julieta declare el saldo del domingo.
+// Es solo una vista: el resultado del mes (ingresos − fijos) no cambia.
+export const repartirFijos = ({ sueldo, fijos, saldoUala }) => {
+  const deJulieta = Math.min(Math.max(0, sueldo), fijos);
+  const deUala = fijos - deJulieta;
+  return { deJulieta, deUala, julietaDespues: sueldo - deJulieta, ualaDespues: saldoUala - deUala };
 };
 
 // Conciliación del lado de Germán: su bruto se usa para sus gastos de Zapia, lo
@@ -258,20 +259,19 @@ export const resolverMes = (monthly, recurrentes, totalesTarjetas, key) => {
   return { ingresos:{ julieta:'', ...(s.ingresos||{}) }, gastos, deuda_anterior: s.deuda_anterior || 0 };
 };
 
-// Resultado mensual = ingresos (sueldo Julieta + lo juntado en Uala) − egresos
-// (fijos con tarjetas + deuda anterior). Los gastos de Zapia ya están netos en el
-// saldo de Uala y la diferencia de conciliación nunca se descuenta aparte.
+// Resultado mensual = ingresos (sueldo de Julieta + saldo de la Uala declarado) − gastos fijos
+// (con tarjetas). Los gastos de Zapia ya salen de ese saldo y la diferencia de conciliación nunca
+// se descuenta aparte. La deuda de meses anteriores NO se arrastra como dato: queda reflejada en el
+// saldo de la Uala. (deuda_anterior de datos viejos se ignora; se conserva guardada sin usarse.)
 export const calcularTotalesMes = (mes, germanIncome) => {
   const ing     = n(mes.ingresos?.julieta) + germanIncome;
   const gas     = Object.values(mes.gastos||{}).reduce((s,v)=>s+n(v),0);
-  const deuda   = n(mes.deuda_anterior) || 0;
-  const egresos = gas + deuda;
-  return { ing, gas, deuda, egresos, saldo: ing - egresos, germanIncome };
+  return { ing, gas, deuda: 0, egresos: gas, saldo: ing - gas, germanIncome };
 };
 
 export const calcularResultadoMensual = (ctx, key) => {
   const mes = resolverMes(ctx.monthly, ctx.gastosRecurrentes, ctx.totalesTarjetas, key);
-  const germanIncome = calcularIngresoGerman(ctx.uberDiDi, key, ctx.zapiaData, ctx.saldoJulieta, ctx.hoyStr);
+  const germanIncome = calcularIngresoGerman(ctx.saldoJulieta, key);
   return { mes, ...calcularTotalesMes(mes, germanIncome) };
 };
 

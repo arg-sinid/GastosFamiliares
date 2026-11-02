@@ -15,7 +15,7 @@
 - Campo nuevo `autoDetalle` (detalle de mantenimiento): arranca vacío, no toca datos viejos.
 
 ## Reglas de negocio aplicadas (confirmadas por Germán)
-- Ingreso de Germán en Principal = saldo de la Uala: en el mes de la última carga de Julieta es ese saldo declarado + transferencias/depósito − gastos de Julieta posteriores a la carga (la diferencia de conciliación NO se resta). Meses ya cerrados: suba del saldo entre cargas (pendiente de decidir).
+- Ingreso de Germán en Principal = saldo de la Uala TAL CUAL lo declara Julieta (último saldo del mes). Sin sumas ni restas: ni movimientos posteriores, ni gastos de Zapia (salen de ese saldo), ni diferencia de conciliación. Mes sin declaración todavía: 0.
 - Saldo esperado = saldo real anterior + transferencias de domingos + depósito de fin de mes − gastos de Zapia de Julieta (efectivo y transferencia).
 - Diferencia = real − esperado. Negativa = gasto hormiga, positiva = sobrante. Solo control: nunca se resta del resultado.
 - Germán: bruto Uber/DiDi vs (sus gastos de Zapia + girado/depositado a Uala + efectivo que queda). Misma convención de signo.
@@ -55,3 +55,10 @@ Sacá captura de Principal (Historial) de los últimos meses ANTES de actualizar
 - La suma de los vehículos coincide con el total de Gastos. El bruto de Uber/DiDi no se reparte por vehículo, así que la rentabilidad se calcula contra todos los vehículos.
 - El detalle de mantenimiento (km, próximo cambio) y el "último km" son por vehículo.
 - Backend: `apps_script_v6.js` cambió solo en los valores por defecto de los campos nuevos. Actualizarlo es opcional (los datos nuevos se guardan igual).
+
+## v5.3 — Saldo de la Uala tal cual y sin arrastre de deuda
+- **Germán · saldo de la Uala** = el último saldo que declaró Julieta en el mes, exacto (con la fecha de la carga). Vale para todos los meses.
+- **Nuevo bloque "Cómo se cubren los fijos"** (Principal → Mes): los fijos se restan primero del sueldo de Julieta y lo que falte, de la Uala de Germán. En un mes nuevo, sin saldo declarado, la Uala puede figurar negativa (provisorio) hasta el domingo en que Julieta declare. Es solo una vista: el resultado mensual sigue siendo ingresos − fijos.
+- **Deuda arrastrada eliminada**: ya no se muestra ni se crea el mes siguiente con deuda al guardar. El campo `deuda_anterior` de meses viejos se conserva guardado pero se ignora en las cuentas.
+- Control (conciliación) no cambia: sigue mostrando esperado, real y diferencia/hormiga como control.
+- **Pendiente:** el "Ahorro acumulado" suma saldos mensuales positivos; con el saldo de la Uala contado en cada mes (es un saldo, no un flujo) ese acumulado se infla. Propuesta: mostrar como ahorro el saldo actual. Necesito tu OK.

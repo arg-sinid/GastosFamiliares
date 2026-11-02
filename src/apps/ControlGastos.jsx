@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
 import {
   n, $$, fmtK, getKey, fmtKey, monthOpts, hoy, uid, fmtDate, calcularVencimientos, VENCIMIENTO_MES_SIGUIENTE_DEFECTO,
-  calcularTotalesTarjetas, calcularIngresoGerman, calcularAhorroManual, calcularAhorroAcumulado,
+  calcularTotalesTarjetas, ultimoSaldoDelMes, repartirFijos, calcularAhorroManual, calcularAhorroAcumulado,
   calcularResultadoMensual, calcularTotalesMes, resolverMes, GASTOS_FIJOS_KEYS,
 } from '../utils.js';
 import { MoneyInput } from '../components/ui.jsx';
@@ -178,8 +178,10 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
   const mesData = resolverMes(allData, recurrentes, totalesTarjetas, selKey);
   const mesEdit = edit && edit.key === selKey ? edit.data : mesData;
 
-  const germanIncome = calcularIngresoGerman(uberDiDi, selKey, zapiaData, saldoJulieta);
+  const saldoDecl    = ultimoSaldoDelMes(saldoJulieta, selKey);     // tal cual lo declara Julieta
+  const germanIncome = saldoDecl ? saldoDecl.valor : 0;
   const tot        = calcularTotalesMes(mesEdit, germanIncome);
+  const reparto    = repartirFijos({ sueldo: n(mesEdit.ingresos.julieta), fijos: tot.gas, saldoUala: germanIncome });
   const ahorroAcum = calcularAhorroAcumulado(ctx, selKey) + calcularAhorroManual(ahorroMovimientos, selKey);
   const meta       = n(metaAhorro);
   const vencimientos = appData.vencimientos || {};
@@ -207,16 +209,9 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
 
   const save = async () => {
     setSaving(true);
-    const [year, month] = selKey.split('-');
-    const nextKey = getKey(new Date(parseInt(year), parseInt(month), 1));
-    const nextMes = allData[nextKey] || { ingresos:{ julieta:'' }, gastos:{}, deuda_anterior:0 };
     const newRec = { ...recurrentes };
     GASTOS_FIJOS_KEYS.forEach(k => { if (recurrentes[k] !== undefined) newRec[k] = n(mesEdit.gastos[k]); });
-    const newMonthly = {
-      ...allData,
-      [selKey]:  mesEdit,
-      [nextKey]: { ...nextMes, deuda_anterior: tot.saldo < 0 ? Math.abs(tot.saldo) : 0 },
-    };
+    const newMonthly = { ...allData, [selKey]: mesEdit };          // ya no se crea el mes siguiente con deuda
     const ok = await saveData({ ...appData, monthly: newMonthly, gastosRecurrentes: newRec });
     setSaving(false);
     if (ok) { setEdit(null); setSavedOk(true); setTimeout(() => setSavedOk(false), 3000); }
@@ -286,7 +281,6 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
                 <div className="text-[10px] font-bold uppercase tracking-wide text-muted">{tot.saldo>=0?'Resultado mensual · ahorro':'Resultado mensual · déficit'}</div>
                 <div className={`text-[32px] font-extrabold mt-1 tracking-tight tabular-nums ${tot.saldo>=0?'text-positive':'text-negative'}`}>{tot.ing===0&&tot.gas===0?'—':$$(Math.abs(tot.saldo))}</div>
                 {meta>0&&tot.ing>0 && <div className="text-[11px] text-muted mt-1">Meta: {$$(meta)} · {tot.saldo>=meta?'✓ Alcanzada':'Faltan '+$$(Math.max(0,meta-tot.saldo))}</div>}
-                {tot.saldo<0 && <div className="text-[11px] text-negative mt-1.5 leading-relaxed">⚠️ Al guardar, {$$(Math.abs(tot.saldo))} pasan al mes siguiente como deuda.</div>}
               </div>
               <div className="text-right text-xs leading-loose">
                 <div className="text-positive">▲ {$$(tot.ing)}</div>
@@ -329,8 +323,8 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
             </div>
             <div className="flex justify-between items-center px-4 py-2.5 bg-positive-soft border-t border-[#E6FFFA]">
               <div>
-                <div className="text-[13px] text-positive font-semibold">👨 Germán · saldo de la Uala (automático)</div>
-                <div className="text-[11px] text-muted-light">Último saldo real que declaró Julieta + lo transferido/depositado y − lo gastado desde esa carga. La diferencia de conciliación no se resta.</div>
+                <div className="text-[13px] text-positive font-semibold">👨 Germán · saldo de la Uala</div>
+                <div className="text-[11px] text-muted-light">{saldoDecl ? `Declarado por Julieta el ${fmtDate(new Date(saldoDecl.fecha+'T12:00:00'))}, tal cual (sin sumas ni restas).` : 'Todavía sin declarar este mes: se muestra cuando Julieta cargue el saldo del domingo.'}</div>
               </div>
               <span className="text-base font-extrabold text-positive tabular-nums">{germanIncome!==0?$$(germanIncome):'—'}</span>
             </div>
@@ -388,17 +382,33 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
                 </div>
               );
             })}
-            {tot.deuda>0 && (
-              <div className="flex justify-between items-center px-4 py-2.5 bg-negative-soft border-t border-[#F5B4A8]">
-                <span className="text-[13px] text-negative font-semibold">⚠️ Deuda mes anterior</span>
-                <span className="text-[13px] font-extrabold text-negative tabular-nums">{$$(tot.deuda)}</span>
-              </div>
-            )}
             <div className="flex justify-between items-center px-4 py-2.5 bg-paper border-t-2 border-border-soft">
-              <span className="text-[13px] font-bold text-negative">{tot.deuda>0?'Total egresos (con deuda)':'Total gastos fijos'}</span>
+              <span className="text-[13px] font-bold text-negative">Total gastos fijos</span>
               <span className="text-base font-extrabold text-negative tabular-nums">{$$(tot.egresos)}</span>
             </div>
           </div>
+
+          {tot.gas>0 && (
+            <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
+              <div className="bg-ink text-white px-4 py-2.5 font-bold text-[13px]">📉 Cómo se cubren los fijos</div>
+              <div className="flex justify-between px-4 py-2.5 border-b border-border-soft">
+                <span className="text-[13px] text-muted">1º Sueldo de Julieta cubre</span><span className="text-[13px] font-bold text-negative tabular-nums">{$$(reparto.deJulieta)}</span>
+              </div>
+              <div className="flex justify-between px-4 py-2.5 border-b border-border-soft">
+                <span className="text-[13px] text-muted">2º Lo que falta sale de la Uala de Germán</span><span className="text-[13px] font-bold text-negative tabular-nums">{$$(reparto.deUala)}</span>
+              </div>
+              <div className="flex justify-between px-4 py-2.5 border-b border-border-soft">
+                <span className="text-[13px] text-ink font-semibold">👩 Julieta después de fijos</span><span className="text-[13px] font-extrabold tabular-nums text-ink">{$$(reparto.julietaDespues)}</span>
+              </div>
+              <div className="flex justify-between items-center px-4 py-2.5 bg-paper">
+                <div>
+                  <div className="text-[13px] text-ink font-semibold">👨 Uala de Germán después de fijos</div>
+                  {!saldoDecl && reparto.ualaDespues < 0 && <div className="text-[10px] text-negative">Negativo provisorio hasta que Julieta declare su saldo el domingo.</div>}
+                </div>
+                <span className={`text-[15px] font-extrabold tabular-nums ${reparto.ualaDespues<0?'text-negative':'text-positive'}`}>{reparto.ualaDespues<0?`-${$$(Math.abs(reparto.ualaDespues))}`:$$(reparto.ualaDespues)}</span>
+              </div>
+            </div>
+          )}
 
           <button onClick={save} disabled={saving||syncing}
             className={`w-full py-3.5 border-none rounded-xl cursor-pointer font-bold text-[15px] text-white shadow-md transition-colors mb-1 touch-manipulation ${btnBg}`}>{btnTx}</button>
