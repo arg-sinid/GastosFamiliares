@@ -58,7 +58,14 @@ Sacá captura de Principal (Historial) de los últimos meses ANTES de actualizar
 
 ## v5.3 — Saldo de la Uala tal cual y sin arrastre de deuda
 - **Germán · saldo de la Uala** = el último saldo que declaró Julieta en el mes, exacto (con la fecha de la carga). Vale para todos los meses.
-- **Nuevo bloque "Cómo se cubren los fijos"** (Principal → Mes): los fijos se restan primero del sueldo de Julieta y lo que falte, de la Uala de Germán. En un mes nuevo, sin saldo declarado, la Uala puede figurar negativa (provisorio) hasta el domingo en que Julieta declare. Es solo una vista: el resultado mensual sigue siendo ingresos − fijos.
+- (Reemplazado en v5.4 por el saldo vivo, ver abajo.)
 - **Deuda arrastrada eliminada**: ya no se muestra ni se crea el mes siguiente con deuda al guardar. El campo `deuda_anterior` de meses viejos se conserva guardado pero se ignora en las cuentas.
 - Control (conciliación) no cambia: sigue mostrando esperado, real y diferencia/hormiga como control.
-- **Pendiente:** el "Ahorro acumulado" suma saldos mensuales positivos; con el saldo de la Uala contado en cada mes (es un saldo, no un flujo) ese acumulado se infla. Propuesta: mostrar como ahorro el saldo actual. Necesito tu OK.
+
+## v5.4 — Saldo vivo de la Uala y ahorro solo manual
+- **Fijos y tarjetas** se pagan por la contabilidad de Principal en los primeros días del mes: ahí sale el dinero de la Uala (confirmado por Germán). Los gastos de Zapia de Julieta también salen de la Uala y se ven en Control.
+- **Saldo vivo:** el saldo declarado el domingo se mantiene tal cual hasta que llega un vencimiento de Principal (fecha anterior a hoy). Desde ahí se va usando: primero el sueldo de Julieta que quede y lo que falte sale de la Uala (puede quedar negativa; provisorio hasta que Julieta declare). Los pagos anteriores a la declaración ya están reflejados en ese saldo. Un vencimiento cuenta como pagado al día siguiente de su fecha (el día que vence figura "vence hoy"). No incluye transferencias ni gastos de Zapia posteriores a la carga (se ven en Control).
+- **El resultado mensual no cambia**: sueldo de Julieta + saldo declarado − gastos fijos. El saldo vivo es una vista de cuánto queda hoy.
+- **Disponible para vencimientos** = sueldo que queda + Uala de hoy (ya descontado lo pagado).
+- **Ahorro:** ahora es solo lo que se carga a mano en Ahorros (ingresos, ajuste inicial, retiros). No suma ni resta nada automático de ingresos/egresos. Se eliminó el acumulado automático, su tabla y su gráfico (el gráfico ahora acumula solo los movimientos manuales).
+- Las etiquetas "ahorro" del resultado del mes pasaron a "a favor".

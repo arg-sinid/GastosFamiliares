@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {
   calcularConciliaciones, calcularPeriodoAbierto, calcularIngresoGerman, conciliarGerman,
   calcularResultadoMensual, calcularTotalesTarjetas, dedupePorId, itemsDelMes, itemsDeLaSemana,
-  agruparGastosPorCategoria, agruparItems, resumenAuto, calcularFilasControl, calcularAhorroAcumulado,
+  agruparGastosPorCategoria, agruparItems, resumenAuto, calcularFilasControl, estadoUala,
   weekDates, getMonday, dateStr, hoy, calcularAhorroManual,
-  ultimoSaldoDelMes, repartirFijos, calcularTotalesMes, calcularVencimientos, fechaVencimiento, vehiculoDeGasto, esCategoriaAuto, resumenAutoMeses,
+  ultimoSaldoDelMes, calcularTotalesMes, calcularVencimientos, fechaVencimiento, vehiculoDeGasto, esCategoriaAuto, resumenAutoMeses,
 } from '../src/utils.js';
 import { categorizarUno } from '../src/categorias.js';
 
@@ -169,12 +169,6 @@ test('hoy() usa la fecha de Buenos Aires aunque en UTC ya sea el día siguiente'
   assert.equal(hoy(new Date('2026-10-28T01:30:00Z')), '2026-10-27');   // 22:30 en Argentina
 });
 
-test('ahorro acumulado no suma meses con saldo negativo', () => {
-  const ctx = { monthly:{ '2026-08':{ ingresos:{julieta:'100'}, gastos:{ alquiler:'300' } }, '2026-09':{ ingresos:{julieta:'500'}, gastos:{ alquiler:'100' } } },
-    gastosRecurrentes:{}, totalesTarjetas:{}, uberDiDi:[], zapiaData:[], saldoJulieta:{}, hoyStr:'2026-10-01' };
-  assert.equal(calcularAhorroAcumulado(ctx, '2026-12'), 400);
-});
-
 test('caso real: saldo declarado 600.000 el domingo 25/10 → Principal muestra 600.000 aunque haya diferencia y movimientos después', () => {
   const s = { '2026-09-27':425000, '2026-10-18':520000, '2026-10-25':600000 };
   const u = [ uber('2026-10-25',{ transferencia:150000 }), uber('2026-10-26',{ transferencia:10000 }) ];
@@ -182,17 +176,6 @@ test('caso real: saldo declarado 600.000 el domingo 25/10 → Principal muestra 
   const [, p] = calcularConciliaciones(s, u.slice(0,1), z.slice(0,1));
   assert.equal(p.diferencia, -40000);                       // hormiga: se informa en Control, no se resta
   assert.equal(calcularIngresoGerman(s, '2026-10'), 600000); // exacto
-});
-
-test('mes nuevo: los fijos se restan primero del sueldo de Julieta y el resto de la Uala (puede quedar negativo hasta declarar)', () => {
-  const r = repartirFijos({ sueldo:1600000, fijos:2500000, saldoUala:0 });
-  assert.equal(r.deJulieta, 1600000); assert.equal(r.deUala, 900000);
-  assert.equal(r.julietaDespues, 0);  assert.equal(r.ualaDespues, -900000);
-  const holgado = repartirFijos({ sueldo:3000000, fijos:2500000, saldoUala:0 });
-  assert.equal(holgado.deUala, 0); assert.equal(holgado.julietaDespues, 500000);
-  // el reparto no cambia el resultado: julieta + uala después = ingresos − fijos
-  const decl = repartirFijos({ sueldo:1600000, fijos:2500000, saldoUala:1100000 });
-  assert.equal(decl.julietaDespues + decl.ualaDespues, 1600000 + 1100000 - 2500000);
 });
 
 test('la deuda del mes anterior ya no se arrastra como dato: se ignora', () => {
@@ -260,4 +243,44 @@ test('vehículos: la suma por vehículo coincide con el total de Gastos (sin dup
 test('categorías de auto reconocidas para pedir vehículo', () => {
   ['Combustible','Mantenimiento','Peajes/TelePASE','Peajes/Autopistas','Auto'].forEach(c => assert.ok(esCategoriaAuto(c)));
   assert.equal(esCategoriaAuto('Supermercado'), false);
+});
+
+// ── Saldo vivo de la Uala ────────────────────────────────────────────
+const grupos2 = [ { fecha:'2026-11-03', total:1200000 }, { fecha:'2026-11-04', total:600000 } ];
+const base2 = { sueldo:1600000, fijos:2500000, saldoDeclarado:1975000, fechaDeclaracion:'2026-11-01', grupos:grupos2 };
+
+test('saldo vivo: antes del primer vencimiento queda igual al declarado', () => {
+  const r = estadoUala({ ...base2, hoyStr:'2026-11-02' });
+  assert.equal(r.ualaHoy, 1975000); assert.equal(r.julietaHoy, 1600000); assert.equal(r.pagadoDespues, 0);
+});
+
+test('saldo vivo: los vencimientos pagados salen primero del sueldo de Julieta y después de la Uala', () => {
+  const dia4 = estadoUala({ ...base2, hoyStr:'2026-11-04' });          // pagó el del 3 (1.200.000): lo cubre el sueldo
+  assert.equal(dia4.julietaHoy, 400000); assert.equal(dia4.ualaHoy, 1975000);
+  const dia5 = estadoUala({ ...base2, hoyStr:'2026-11-05' });          // pagó también el del 4 (600.000): 400.000 sueldo + 200.000 Uala
+  assert.equal(dia5.julietaHoy, 0); assert.equal(dia5.ualaHoy, 1775000);
+  assert.equal(dia5.disponibleHoy, 1775000);
+});
+
+test('saldo vivo: lo vencido antes de la declaración ya está en el saldo declarado (solo gastó sueldo)', () => {
+  const r = estadoUala({ ...base2, fechaDeclaracion:'2026-11-03', hoyStr:'2026-11-05' });
+  assert.equal(r.julietaHoy, 0);   // sueldo 1.6M − 1.2M (antes) = 400k; el del 4 gasta esos 400k y 200k salen de la Uala
+  assert.equal(r.ualaHoy, 1975000 - 200000);
+});
+
+test('saldo vivo: mes nuevo sin declaración → la Uala puede quedar negativa y se muestra lo que falta pagar', () => {
+  const r = estadoUala({ sueldo:1600000, fijos:2500000, saldoDeclarado:null, fechaDeclaracion:'', grupos:grupos2, hoyStr:'2026-11-05' });
+  assert.equal(r.ualaHoy, -200000);                 // pagó 1.800.000 con 1.600.000 de sueldo
+  assert.equal(r.faltaPagar, 700000);               // 2.500.000 − 1.800.000
+  assert.equal(r.ualaFinal, -900000);               // mismo reparto que repartirFijos: sueldo primero, el resto de la Uala
+});
+
+test('saldo vivo: sin vencimientos cargados no se mueve (comportamiento anterior)', () => {
+  const r = estadoUala({ sueldo:1000, fijos:500, saldoDeclarado:300, fechaDeclaracion:'2026-11-01', grupos:[], hoyStr:'2026-11-20' });
+  assert.equal(r.ualaHoy, 300); assert.equal(r.faltaPagar, 500);
+});
+
+test('calcularVencimientos expone todos los grupos para calcular lo ya pagado', () => {
+  const r = calcularVencimientos({ vencimientos:venc, gastos:gastosOct, mesKey:'2026-10', hoyStr:'2026-11-04', disponible:0 });
+  assert.equal(r.todos.length, 2);
 });

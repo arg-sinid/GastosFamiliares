@@ -141,15 +141,6 @@ export const ultimoSaldoDelMes = (saldoJulieta, mesKey) => {
 };
 export const calcularIngresoGerman = (saldoJulieta, mesKey) => ultimoSaldoDelMes(saldoJulieta, mesKey)?.valor ?? 0;
 
-// Cómo se cubren los gastos fijos: primero con el sueldo de Julieta y lo que falte sale del saldo de
-// la Uala de Germán, que puede quedar negativo hasta que Julieta declare el saldo del domingo.
-// Es solo una vista: el resultado del mes (ingresos − fijos) no cambia.
-export const repartirFijos = ({ sueldo, fijos, saldoUala }) => {
-  const deJulieta = Math.min(Math.max(0, sueldo), fijos);
-  const deUala = fijos - deJulieta;
-  return { deJulieta, deUala, julietaDespues: sueldo - deJulieta, ualaDespues: saldoUala - deUala };
-};
-
 // Conciliación del lado de Germán: su bruto se usa para sus gastos de Zapia, lo
 // transferido/depositado a Uala y el efectivo que le queda. Lo que no cierra es
 // diferencia (negativa = salida sin registrar / gasto hormiga).
@@ -275,12 +266,8 @@ export const calcularResultadoMensual = (ctx, key) => {
   return { mes, ...calcularTotalesMes(mes, germanIncome) };
 };
 
-// Ahorro automático: suma de saldos mensuales positivos hasta un mes.
-export const calcularAhorroAcumulado = (ctx, upTo) =>
-  Object.keys(ctx.monthly||{}).sort().filter(k => k <= upTo)
-    .reduce((s,k) => s + Math.max(0, calcularResultadoMensual(ctx, k).saldo), 0);
-
-// Movimientos MANUALES de ahorro (ajuste inicial, ingresos extra, retiros).
+// AHORRO = solo los movimientos que se cargan a mano (ajuste inicial, ingresos extra, retiros).
+// No se suma nada automático de los ingresos/egresos del mes.
 export const calcularAhorroManual = (movimientos, upTo) => (movimientos||[])
   .filter(m => !upTo || (m.fecha && m.fecha.slice(0,7) <= upTo))
   .reduce((s,m) => s + (m.tipo === 'retiro' ? -n(m.monto) : n(m.monto)), 0);
@@ -336,7 +323,7 @@ export const calcularVencimientos = ({ vencimientos, gastos, mesKey, hoyStr, dis
     return { ...g, acumulado, balance: disponible - acumulado };
   });
   return {
-    pendientes, vencidos: grupos.filter(g => g.fecha < hoyStr), proximo: pendientes[0] || null,
+    todos: grupos, pendientes, vencidos: grupos.filter(g => g.fecha < hoyStr), proximo: pendientes[0] || null,
     totalPendiente: acumulado, disponible, balance: disponible - acumulado, hayConfigurados: grupos.length > 0,
   };
 };
@@ -351,3 +338,28 @@ export const vehiculoDeGasto = (gastoId, gastoVehiculo, vehiculos) => {
   return vehiculos?.[0]?.id || null;
 };
 export const esCategoriaAuto = (categoria) => Object.values(GRUPOS_AUTO).some(g => g.categorias.includes(categoria));
+
+// Saldo "vivo" de la Uala. El saldo que declara Julieta el domingo es real a esa fecha; cuando llegan los
+// vencimientos de Principal (los que ya pasaron: fecha < hoy) ese dinero se va usando para pagarlos:
+// primero con el sueldo de Julieta que quede y lo que falte sale de la Uala (puede quedar negativa).
+// Los pagos anteriores a la declaración ya están reflejados en el saldo declarado: solo gastaron sueldo.
+// No incluye transferencias ni gastos de Zapia posteriores a la carga (se ven en Control).
+export const estadoUala = ({ sueldo, fijos, saldoDeclarado, fechaDeclaracion, grupos, hoyStr }) => {
+  const J = Math.max(0, n(sueldo));
+  const S = saldoDeclarado == null ? 0 : n(saldoDeclarado);
+  const D = fechaDeclaracion || '';
+  const suma = pred => (grupos||[]).filter(g => g.fecha < hoyStr && pred(g)).reduce((s,g) => s + g.total, 0);
+  const pagadoAntes   = D ? suma(g => g.fecha <= D) : 0;
+  const pagadoDespues = suma(g => !D || g.fecha > D);
+  const sueldoRestante = J - Math.min(J, pagadoAntes);
+  const deJulieta = Math.min(sueldoRestante, pagadoDespues);
+  const julietaHoy = sueldoRestante - deJulieta;
+  const ualaHoy = S - (pagadoDespues - deJulieta);
+  const pagadoTotal = pagadoAntes + pagadoDespues;
+  const faltaPagar = Math.max(0, n(fijos) - pagadoTotal);      // vencimientos futuros + fijos sin fecha
+  const finalJ = Math.min(julietaHoy, faltaPagar);
+  return {
+    pagadoTotal, pagadoDespues, faltaPagar, julietaHoy, ualaHoy, disponibleHoy: julietaHoy + ualaHoy,
+    julietaFinal: julietaHoy - finalJ, ualaFinal: ualaHoy - (faltaPagar - finalJ),
+  };
+};
