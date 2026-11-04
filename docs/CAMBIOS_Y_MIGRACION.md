@@ -69,3 +69,9 @@ Sacá captura de Principal (Historial) de los últimos meses ANTES de actualizar
 - **Disponible para vencimientos** = sueldo que queda + Uala de hoy (ya descontado lo pagado).
 - **Ahorro:** ahora es solo lo que se carga a mano en Ahorros (ingresos, ajuste inicial, retiros). No suma ni resta nada automático de ingresos/egresos. Se eliminó el acumulado automático, su tabla y su gráfico (el gráfico ahora acumula solo los movimientos manuales).
 - Las etiquetas "ahorro" del resultado del mes pasaron a "a favor".
+
+## v5.5 — Pagos del mes anterior, solo transferencias de Julieta y texto del vencimiento
+- **Texto de la tarjeta de vencimientos:** arriba se lee el estado ("✓ Hay plata suficiente para pagarlo" / "⚠️ No alcanza la plata para pagarlo"); abajo, lo que hay que pagar, lo disponible hoy y cuánto sobra o falta.
+- **Pagos del mes anterior (opción B):** los vencimientos del mes anterior que caen dentro del mes que se mira (por ejemplo las tarjetas de octubre pagadas el 3 y 4/11) se restan del saldo de la Uala a partir del día siguiente a su fecha, y solo si son posteriores a la declaración del domingo. Salen primero del sueldo de su propio mes (octubre) y después de la Uala. La Uala puede quedar negativa hasta que Julieta declare de nuevo. Los anteriores a la declaración ya están reflejados en ese saldo.
+- **Gastos de Julieta por Zapia:** de la Uala solo salen los cargados por Julieta en modo **transferencia** (en la conciliación de Control y en el saldo de Principal). Los de efectivo y los de Germán no restan. En Principal bajan el saldo los posteriores a la declaración.
+- No cambia el resultado mensual (sueldo + saldo declarado − fijos) ni el ahorro manual.

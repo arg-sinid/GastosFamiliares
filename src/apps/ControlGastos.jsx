@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
 import {
   n, $$, fmtK, getKey, fmtKey, monthOpts, hoy, uid, fmtDate, calcularVencimientos, VENCIMIENTO_MES_SIGUIENTE_DEFECTO,
-  calcularTotalesTarjetas, ultimoSaldoDelMes, estadoUala, calcularAhorroManual,
+  calcularTotalesTarjetas, ultimoSaldoDelMes, estadoUala, gastosZapiaDe, calcularAhorroManual,
   calcularResultadoMensual, calcularTotalesMes, resolverMes, GASTOS_FIJOS_KEYS,
 } from '../utils.js';
 import { MoneyInput } from '../components/ui.jsx';
@@ -107,14 +107,23 @@ function VencimientosCard({ venc, hoyStr, etiquetas }) {
         <span className="text-[11px] opacity-80">{txtDias(p.fecha)}</span>
       </div>
       <div className={`px-4 py-3.5 ${ok?'bg-positive-soft':'bg-negative-soft'}`}>
-        <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Para este vencimiento hace falta reunir</div>
-        <div className="text-[30px] font-extrabold tracking-tight tabular-nums text-ink">{$$(p.acumulado)}</div>
-        <div className="flex justify-between items-center mt-1">
-          <span className="text-xs text-muted">Disponible hoy (sueldo que queda + Uala): <strong className="tabular-nums">{$$(venc.disponible)}</strong></span>
+        <div className={`text-[17px] font-extrabold ${ok?'text-positive':'text-negative'}`}>
+          {ok ? '✓ Hay plata suficiente para pagarlo' : '⚠️ No alcanza la plata para pagarlo'}
         </div>
-        <div className={`mt-2 text-[13px] font-extrabold ${ok?'text-positive':'text-negative'}`}>
-          {ok ? `✓ Alcanza — sobran ${$$(p.balance)}` : `⚠️ Faltan ${$$(Math.abs(p.balance))}`}
+        <div className="flex justify-between items-end mt-2">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wide text-muted">A pagar en este vencimiento</div>
+            <div className="text-[26px] font-extrabold tracking-tight tabular-nums text-ink">{$$(p.acumulado)}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-muted">Disponible hoy</div>
+            <div className="text-[20px] font-extrabold tabular-nums text-ink">{$$(venc.disponible)}</div>
+          </div>
         </div>
+        <div className={`mt-1.5 text-[13px] font-bold ${ok?'text-positive':'text-negative'}`}>
+          {ok ? `Sobran ${$$(p.balance)}` : `Faltan ${$$(Math.abs(p.balance))}`}
+        </div>
+        <div className="text-[10px] text-muted-light mt-0.5">Disponible = sueldo de Julieta que queda + saldo de la Uala de hoy.</div>
       </div>
       <div className="bg-white">
         {venc.pendientes.map((g, i) => (
@@ -187,11 +196,18 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
   const vencimientos = appData.vencimientos || {};
   const hoyStr = hoy();
   // Disponible = ingresos familiares del mes (sueldo de Julieta + saldo de la Uala de Germán).
-  // Saldo "vivo" de la Uala: el declarado el domingo se va usando a medida que pasan los vencimientos
-  // (primero sueldo de Julieta, después la Uala). Esos pagos son los de este mes de Principal.
+  // Saldo "vivo" de la Uala: el declarado el domingo se va usando con (a) los vencimientos que ya pasaron, tanto
+  // de este mes como del mes anterior que caen en este mes (p. ej. tarjetas de octubre pagadas el 3 y 4/11), y
+  // (b) los gastos que Julieta carga en Zapia en modo transferencia. Primero se usa el sueldo, después la Uala.
+  const [py, pm] = selKey.split('-').map(Number);
+  const prevKey = getKey(new Date(py, pm - 2, 1));
+  const prevMes = resolverMes(allData, recurrentes, totalesTarjetas, prevKey);
+  const grupoPrev = calcularVencimientos({ vencimientos, gastos: prevMes.gastos, mesKey: prevKey, hoyStr, disponible: 0 });
   const grupoVenc = calcularVencimientos({ vencimientos, gastos: mesEdit.gastos, mesKey: selKey, hoyStr, disponible: 0 });
+  const gastosUala = saldoDecl ? gastosZapiaDe(zapiaData, 'Julieta', saldoDecl.fecha, hoyStr, 'transferencia') : 0;
   const vivo = estadoUala({ sueldo: n(mesEdit.ingresos.julieta), fijos: tot.gas, saldoDeclarado: saldoDecl ? saldoDecl.valor : null,
-                            fechaDeclaracion: saldoDecl?.fecha || '', grupos: grupoVenc.todos, hoyStr });
+                            fechaDeclaracion: saldoDecl?.fecha || '', grupos: grupoVenc.todos, hoyStr, gastosUala,
+                            mesAnterior: { sueldo: n(prevMes.ingresos.julieta), grupos: grupoPrev.todos, desde: `${selKey}-01` } });
   // Lo que falta pagar se compara con lo que hay HOY (después de lo ya pagado).
   const venc = calcularVencimientos({ vencimientos, gastos: mesEdit.gastos, mesKey: selKey, hoyStr, disponible: vivo.disponibleHoy });
   const etiquetas = Object.fromEntries(GASTOS_CONFIG.map(g => [g.key, g.label]));
@@ -332,7 +348,7 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
                 <div className="text-[13px] text-positive font-semibold">👨 Germán · saldo de la Uala</div>
                 <div className="text-[11px] text-muted-light">
                   {saldoDecl
-                    ? <>Declarado por Julieta el {fmtDate(new Date(saldoDecl.fecha+'T12:00:00'))}: <strong>{$$(saldoDecl.valor)}</strong>{vivo.pagadoDespues>0 ? <> · se usó en vencimientos de Principal desde entonces</> : ''}.</>
+                    ? <>Declarado por Julieta el {fmtDate(new Date(saldoDecl.fecha+'T12:00:00'))}: <strong>{$$(saldoDecl.valor)}</strong>{(vivo.pagadoDespues>0 || vivo.anteriorPagado>0 || vivo.gastosUala>0) ? <> · desde entonces se fue usando en vencimientos y gastos de Julieta por transferencia</> : ''}.</>
                     : 'Todavía sin declarar este mes: se muestra cuando Julieta cargue el saldo del domingo.'}
                 </div>
               </div>
@@ -404,8 +420,20 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
               <div className="px-4 py-2 bg-paper text-[11px] text-muted-light border-b border-border-soft">
                 Cuando llega un vencimiento se paga primero con el sueldo de Julieta y lo que falte sale de la Uala de Germán.
               </div>
+              {vivo.anteriorPagado > 0 && (
+                <div className="flex justify-between px-4 py-2.5 border-b border-border-soft">
+                  <span className="text-[13px] text-muted">Vencimientos de {fmtKey(prevKey).split(' ')[0]} pagados desde la declaración <span className="text-[11px] text-muted-light">(de la Uala: {$$(vivo.anteriorDeUala)})</span></span>
+                  <span className="text-[13px] font-bold text-negative tabular-nums">{$$(vivo.anteriorPagado)}</span>
+                </div>
+              )}
+              {vivo.gastosUala > 0 && (
+                <div className="flex justify-between px-4 py-2.5 border-b border-border-soft">
+                  <span className="text-[13px] text-muted">Gastos de Julieta por transferencia desde la declaración</span>
+                  <span className="text-[13px] font-bold text-negative tabular-nums">{$$(vivo.gastosUala)}</span>
+                </div>
+              )}
               <div className="flex justify-between px-4 py-2.5 border-b border-border-soft">
-                <span className="text-[13px] text-muted">Pagado hasta hoy (vencimientos que ya pasaron)</span>
+                <span className="text-[13px] text-muted">Vencimientos de este mes ya pagados</span>
                 <span className="text-[13px] font-bold text-negative tabular-nums">{$$(vivo.pagadoTotal)}</span>
               </div>
               <div className="flex justify-between px-4 py-2.5 border-b border-border-soft">

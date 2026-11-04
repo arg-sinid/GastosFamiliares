@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   calcularConciliaciones, calcularPeriodoAbierto, calcularIngresoGerman, conciliarGerman,
   calcularResultadoMensual, calcularTotalesTarjetas, dedupePorId, itemsDelMes, itemsDeLaSemana,
-  agruparGastosPorCategoria, agruparItems, resumenAuto, calcularFilasControl, estadoUala,
+  agruparGastosPorCategoria, agruparItems, resumenAuto, calcularFilasControl, estadoUala, gastosZapiaDe,
   weekDates, getMonday, dateStr, hoy, calcularAhorroManual,
   ultimoSaldoDelMes, calcularTotalesMes, calcularVencimientos, fechaVencimiento, vehiculoDeGasto, esCategoriaAuto, resumenAutoMeses,
 } from '../src/utils.js';
@@ -17,7 +17,7 @@ const saldos = { '2026-10-04':100000, '2026-10-11':130000 };
 const ud = [ uber('2026-10-11',{ transferencia:50000, total:60000 }) ];
 
 test('8. conciliación con saldo real igual al esperado → diferencia 0 y el ingreso es el delta', () => {
-  const z = [ zap('2026-10-07','Julieta',14000,'transferencia'), zap('2026-10-08','Julieta',6000,'efectivo') ];
+  const z = [ zap('2026-10-07','Julieta',14000,'transferencia'), zap('2026-10-08','Julieta',6000,'transferencia'), zap('2026-10-08','Julieta',9999,'efectivo') ];   // el efectivo no sale de la Uala
   const [p] = calcularConciliaciones(saldos, ud, z);
   assert.equal(p.esperado, 100000 + 50000 - 20000);
   assert.equal(p.diferencia, 0);
@@ -41,10 +41,10 @@ test('10. el gasto hormiga NO se descuenta otra vez del resultado mensual', () =
   assert.equal(r.saldo, 1000000 + 130000 - 200000);
 });
 
-test('gastos de Julieta incluyen efectivo y transferencia; los de Germán no entran a la Uala', () => {
-  const z = [ zap('2026-10-07','Julieta',1000,'efectivo'), zap('2026-10-07','Julieta',2000,'transferencia'), zap('2026-10-07','Germán',99999,'efectivo') ];
+test('de la Uala solo salen los gastos de Julieta en modo transferencia (ni efectivo, ni los de Germán)', () => {
+  const z = [ zap('2026-10-07','Julieta',1000,'efectivo'), zap('2026-10-07','Julieta',2000,'transferencia'), zap('2026-10-07','Germán',99999,'transferencia') ];
   const [p] = calcularConciliaciones(saldos, ud, z);
-  assert.equal(p.gastosJulieta, 3000);
+  assert.equal(p.gastosJulieta, 2000);
 });
 
 test('depósito de fin de mes: cuenta una sola vez (en el esperado) y no se suma aparte al ingreso', () => {
@@ -283,4 +283,32 @@ test('saldo vivo: sin vencimientos cargados no se mueve (comportamiento anterior
 test('calcularVencimientos expone todos los grupos para calcular lo ya pagado', () => {
   const r = calcularVencimientos({ vencimientos:venc, gastos:gastosOct, mesKey:'2026-10', hoyStr:'2026-11-04', disponible:0 });
   assert.equal(r.todos.length, 2);
+});
+
+// ── Opción B: pagos del mes anterior y gastos de Julieta por transferencia ──
+const prevOct = { sueldo:1000000, grupos:[ { fecha:'2026-11-03', total:1200000 }, { fecha:'2026-11-04', total:600000 } ], desde:'2026-11-01' };
+const novBase = { sueldo:0, fijos:1347000, saldoDeclarado:740000, fechaDeclaracion:'2026-11-01', grupos:[ { fecha:'2026-12-04', total:330000 } ], mesAnterior:prevOct };
+
+test('mes anterior: antes de que lleguen los vencimientos de octubre, el saldo declarado no se mueve', () => {
+  const r = estadoUala({ ...novBase, hoyStr:'2026-11-03' });            // el 3/11 todavía "vence hoy"
+  assert.equal(r.ualaHoy, 740000); assert.equal(r.anteriorPagado, 0);
+});
+
+test('mes anterior: las tarjetas de octubre pagadas en noviembre salen primero del sueldo de octubre y luego de la Uala', () => {
+  const r = estadoUala({ ...novBase, hoyStr:'2026-11-05' });            // pagó 1.800.000: 1.000.000 sueldo + 800.000 Uala
+  assert.equal(r.anteriorPagado, 1800000); assert.equal(r.anteriorDeUala, 800000);
+  assert.equal(r.ualaHoy, -60000);                                      // queda negativa hasta que Julieta declare de nuevo
+});
+
+test('mes anterior: un pago de octubre anterior a la declaración ya está en el saldo declarado', () => {
+  const r = estadoUala({ ...novBase, grupos:[], fechaDeclaracion:'2026-11-03', hoyStr:'2026-11-05' });
+  assert.equal(r.anteriorPagado, 600000);                               // solo el del 4/11 es posterior; el del 3/11 ya estaba reflejado
+  assert.equal(r.anteriorDeUala, 600000);                               // el del 3/11 (1.200.000) ya agotó el sueldo de octubre (1.000.000); el del 4/11 sale entero de la Uala
+});
+
+test('los gastos de Julieta por transferencia posteriores a la declaración bajan el saldo; los de efectivo no', () => {
+  const z = [ zap('2026-11-02','Julieta',20000,'transferencia'), zap('2026-11-02','Julieta',50000,'efectivo'), zap('2026-11-02','Germán',70000,'transferencia'), zap('2026-10-31','Julieta',9000,'transferencia') ];
+  const gastosUala = gastosZapiaDe(z, 'Julieta', '2026-11-01', '2026-11-03', 'transferencia');
+  assert.equal(gastosUala, 20000);                                      // el del 31/10 es anterior a la declaración
+  assert.equal(estadoUala({ ...novBase, mesAnterior:null, gastosUala, hoyStr:'2026-11-03' }).ualaHoy, 720000);
 });

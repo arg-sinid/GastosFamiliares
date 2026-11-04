@@ -76,8 +76,8 @@ export const dedupePorId = (movs) => {
 
 // ── Conciliación de la cuenta Uala de Julieta ───────────────────────
 // Modelo: Germán gira los domingos lo que le sobra del bruto a la Uala (y el
-// último día del mes deposita efectivo). De esa cuenta salen los gastos de
-// Julieta cargados en Zapia (efectivo y transferencia). Julieta declara el saldo
+// último día del mes deposita efectivo). De esa cuenta salen SOLO los gastos de
+// Julieta cargados en Zapia en modo transferencia. Julieta declara el saldo
 // real; la diferencia contra el esperado es la diferencia de conciliación
 // (negativa = gasto hormiga, positiva = sobrante).
 export const aportesAUala = (uberDiDi, desde, hasta) => {
@@ -88,8 +88,10 @@ export const aportesAUala = (uberDiDi, desde, hasta) => {
   });
   return { transferencias, deposito, total: transferencias + deposito };
 };
-export const gastosZapiaDe = (zapiaData, quien, desde, hasta) =>
-  (zapiaData||[]).filter(r => r.fecha && r.fecha > desde && r.fecha <= hasta && r.quien === quien)
+// Gastos de Zapia de una persona en (desde, hasta]. Con `medio` solo cuenta ese modo de pago.
+// De la Uala de Julieta SOLO salen los gastos que ella carga en modo transferencia.
+export const gastosZapiaDe = (zapiaData, quien, desde, hasta, medio = null) =>
+  (zapiaData||[]).filter(r => r.fecha && r.fecha > desde && r.fecha <= hasta && r.quien === quien && (!medio || r.medio === medio))
                  .reduce((s,r) => s + n(r.costo), 0);
 
 export const conciliarUala = ({ saldoIni, saldoReal, aportes, gastos }) => {
@@ -106,7 +108,7 @@ export const calcularConciliaciones = (saldoJulieta, uberDiDi, zapiaData) => {
     const fIni = fechas[i-1], fFin = fechas[i];
     const saldoIni = n(saldoJulieta[fIni]), saldoReal = n(saldoJulieta[fFin]);
     const ap = aportesAUala(uberDiDi, fIni, fFin);
-    const gastos = gastosZapiaDe(zapiaData, 'Julieta', fIni, fFin);
+    const gastos = gastosZapiaDe(zapiaData, 'Julieta', fIni, fFin, 'transferencia');
     periodos.push({
       fechaInicio: fIni, fechaFin: fFin, saldoIni, saldoReal,
       transferido: ap.transferencias, deposito: ap.deposito, gastosJulieta: gastos,
@@ -124,7 +126,7 @@ export const calcularPeriodoAbierto = (saldoJulieta, uberDiDi, zapiaData, hoyStr
   if (!ultima) return null;
   const saldoIni = n(saldoJulieta[ultima]);
   const ap = aportesAUala(uberDiDi, ultima, hoyStr);
-  const gastos = gastosZapiaDe(zapiaData, 'Julieta', ultima, hoyStr);
+  const gastos = gastosZapiaDe(zapiaData, 'Julieta', ultima, hoyStr, 'transferencia');
   return {
     fechaInicio: ultima, saldoIni, transferido: ap.transferencias, deposito: ap.deposito,
     gastosJulieta: gastos, saldoEstimado: saldoIni + ap.total - gastos, ingresoEstimado: ap.total - gastos,
@@ -339,27 +341,37 @@ export const vehiculoDeGasto = (gastoId, gastoVehiculo, vehiculos) => {
 };
 export const esCategoriaAuto = (categoria) => Object.values(GRUPOS_AUTO).some(g => g.categorias.includes(categoria));
 
-// Saldo "vivo" de la Uala. El saldo que declara Julieta el domingo es real a esa fecha; cuando llegan los
-// vencimientos de Principal (los que ya pasaron: fecha < hoy) ese dinero se va usando para pagarlos:
-// primero con el sueldo de Julieta que quede y lo que falte sale de la Uala (puede quedar negativa).
-// Los pagos anteriores a la declaración ya están reflejados en el saldo declarado: solo gastaron sueldo.
-// No incluye transferencias ni gastos de Zapia posteriores a la carga (se ven en Control).
-export const estadoUala = ({ sueldo, fijos, saldoDeclarado, fechaDeclaracion, grupos, hoyStr }) => {
-  const J = Math.max(0, n(sueldo));
+// Saldo "vivo" de la Uala. El saldo que declara Julieta el domingo es real a esa fecha. Desde entonces se va usando:
+//  · vencimientos de Principal que ya pasaron (fecha < hoy): primero con el sueldo de Julieta que quede y lo
+//    que falte sale de la Uala (puede quedar negativa). Cuentan los del mes que se mira y también los del MES
+//    ANTERIOR que caen dentro de este mes (p. ej. las tarjetas de octubre que se pagan el 3 y 4/11), cada uno
+//    contra el sueldo de su propio mes;
+//  · gastos de Zapia que Julieta carga en modo transferencia después de la declaración.
+// Los pagos anteriores a la declaración ya están reflejados en el saldo declarado (solo gastaron sueldo).
+export const estadoUala = ({ sueldo, fijos, saldoDeclarado, fechaDeclaracion, grupos, hoyStr, mesAnterior = null, gastosUala = 0 }) => {
   const S = saldoDeclarado == null ? 0 : n(saldoDeclarado);
   const D = fechaDeclaracion || '';
-  const suma = pred => (grupos||[]).filter(g => g.fecha < hoyStr && pred(g)).reduce((s,g) => s + g.total, 0);
-  const pagadoAntes   = D ? suma(g => g.fecha <= D) : 0;
-  const pagadoDespues = suma(g => !D || g.fecha > D);
-  const sueldoRestante = J - Math.min(J, pagadoAntes);
-  const deJulieta = Math.min(sueldoRestante, pagadoDespues);
-  const julietaHoy = sueldoRestante - deJulieta;
-  const ualaHoy = S - (pagadoDespues - deJulieta);
-  const pagadoTotal = pagadoAntes + pagadoDespues;
+  // Un "pozo" = sueldo de un mes + sus vencimientos. Devuelve cuánto se pagó con sueldo y cuánto con Uala.
+  const pozo = (J0, gs, desdeFecha) => {
+    const J = Math.max(0, n(J0));
+    const pasados = (gs||[]).filter(g => g.fecha < hoyStr);
+    const suma = arr => arr.reduce((x,g) => x + g.total, 0);
+    const antes   = D ? suma(pasados.filter(g => g.fecha <= D)) : 0;
+    const despues = suma(pasados.filter(g => (!D || g.fecha > D) && (!desdeFecha || g.fecha >= desdeFecha)));
+    const restante = J - Math.min(J, antes);
+    const deJulieta = Math.min(restante, despues);
+    return { antes, despues, sueldoHoy: restante - deJulieta, deUala: despues - deJulieta };
+  };
+  const actual = pozo(sueldo, grupos, null);
+  const previo = mesAnterior ? pozo(mesAnterior.sueldo, mesAnterior.grupos, mesAnterior.desde) : { despues:0, deUala:0, sueldoHoy:0 };
+  const ualaHoy = S - actual.deUala - previo.deUala - n(gastosUala);
+  const pagadoTotal = actual.antes + actual.despues;
   const faltaPagar = Math.max(0, n(fijos) - pagadoTotal);      // vencimientos futuros + fijos sin fecha
-  const finalJ = Math.min(julietaHoy, faltaPagar);
+  const finalJ = Math.min(actual.sueldoHoy, faltaPagar);
   return {
-    pagadoTotal, pagadoDespues, faltaPagar, julietaHoy, ualaHoy, disponibleHoy: julietaHoy + ualaHoy,
-    julietaFinal: julietaHoy - finalJ, ualaFinal: ualaHoy - (faltaPagar - finalJ),
+    pagadoTotal, pagadoDespues: actual.despues, faltaPagar,
+    anteriorPagado: previo.despues, anteriorDeUala: previo.deUala, gastosUala: n(gastosUala),
+    julietaHoy: actual.sueldoHoy, ualaHoy, disponibleHoy: actual.sueldoHoy + ualaHoy,
+    julietaFinal: actual.sueldoHoy - finalJ, ualaFinal: ualaHoy - (faltaPagar - finalJ),
   };
 };
