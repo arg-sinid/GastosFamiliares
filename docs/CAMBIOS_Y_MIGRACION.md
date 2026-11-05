@@ -90,3 +90,12 @@ Sacá captura de Principal (Historial) de los últimos meses ANTES de actualizar
 - Sobre el saldo declarado se descuentan sus gastos de Zapia **por transferencia**; "transferencia" se reconoce por la raíz (transferencia, transf., etc.). La diferencia contra el próximo saldo declarado es el gasto hormiga (negativa) o sobrante (positiva).
 - Se quitó la fila "Transferido desde esa carga" cuando es 0 (aparece solo si Germán transfirió).
 - Nuevo desplegable **🔎 Qué gastos de Julieta restan**: lista los que restan, los del mismo día de la carga (ya incluidos en el saldo), los que no son transferencia y los que no se pudo identificar quién cargó. Sirve para ver por qué un gasto no está restando.
+
+## v5.7 — Las tarjetas se ven en el Principal en que se pagan
+- Los resúmenes de tarjeta se etiquetan con el mes de los gastos (p. ej. octubre) pero se pagan después. Antes Principal buscaba el resumen del MISMO mes, por eso en noviembre aparecían en 0.
+- Ahora hay un ajuste en Principal → Gastos fijos: **"En Noviembre se pagan los resúmenes de: el mes anterior (Octubre) / el mismo mes"**. Por defecto es "el mes anterior": el resumen de octubre cuenta en el Principal de noviembre y vence en diciembre (con el 📅 de la tarjeta en "mes siguiente").
+- Cada tarjeta en Principal muestra de qué resumen sale ("💳 resumen de Octubre") o "sin resumen de Octubre" si todavía no se cargó.
+- En Gastos → Tarjetas, cada resumen indica en qué Principal entra y su vencimiento ("Entra en el Principal de Noviembre · vence 03/12").
+- Afecta: total de ICBC/BNA en Principal, vencimientos (monto de la tarjeta), resultado mensual, historial y la hoja Control. NO cambia: Gastos (sigue por mes del resumen/gasto), Cierre económico y el historial de tarjetas.
+- Se guarda como `ajustes.tarjetaDesfase` (0 o 1) y se sincroniza entre celulares.
+- Atención: el Principal de octubre pasa a mostrar el resumen de septiembre. Si preferís el criterio anterior, elegí "el mismo mes".

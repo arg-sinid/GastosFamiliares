@@ -49,7 +49,7 @@ export const mesesAtras = (mesKey, cantidad) => {
 export const EMPTY_DATA = () => ({
   monthly:{}, categories:{}, uberDiDi:[], gastosRecurrentes:{},
   saldoJulieta:{}, dolarTarjeta:{}, ahorroMovimientos:[], autoDetalle:{},
-  vencimientos:{}, vehiculos:[], gastoVehiculo:{}, pagosFijos:{},
+  vencimientos:{}, vehiculos:[], gastoVehiculo:{}, pagosFijos:{}, ajustes:{},
 });
 export const normalizarAppData = (d) => {
   const e = EMPTY_DATA(), x = d || {};
@@ -59,7 +59,7 @@ export const normalizarAppData = (d) => {
     dolarTarjeta: x.dolarTarjeta||e.dolarTarjeta, ahorroMovimientos: x.ahorroMovimientos||e.ahorroMovimientos,
     autoDetalle: x.autoDetalle||e.autoDetalle,
     vencimientos: x.vencimientos||e.vencimientos, vehiculos: x.vehiculos||e.vehiculos, gastoVehiculo: x.gastoVehiculo||e.gastoVehiculo,
-    pagosFijos: x.pagosFijos||e.pagosFijos,
+    pagosFijos: x.pagosFijos||e.pagosFijos, ajustes: x.ajustes||e.ajustes,
   };
 };
 
@@ -170,16 +170,24 @@ export const conciliarGerman = ({ bruto, gastos, aportes, efectivo }) => ({
 // ── Tarjetas ─────────────────────────────────────────────────────────
 export const montoEnPesos = (m, dolar) => m.moneda === 'USD' ? m.importe * dolar : m.importe;
 
-export const calcularTotalesTarjetas = (movimientos, dolarTarjetaMap) => {
+// Los resúmenes de tarjeta se etiquetan con el mes en que se hicieron los gastos (p. ej. octubre) pero se pagan
+// después. `desfase` = cuántos meses después se paga: con 1, el resumen de octubre cuenta en el Principal de
+// NOVIEMBRE (vence en diciembre). Por defecto es 1 (ver `ajustes.tarjetaDesfase`).
+export const TARJETA_DESFASE_DEFECTO = 1;
+export const desfaseTarjetas = (ajustes) => (ajustes && ajustes.tarjetaDesfase != null) ? Math.max(0, Math.round(n(ajustes.tarjetaDesfase))) : TARJETA_DESFASE_DEFECTO;
+
+// Devuelve los totales por mes de PRINCIPAL (mes del resumen + desfase).
+export const calcularTotalesTarjetas = (movimientos, dolarTarjetaMap, desfase = 0) => {
   const out = {};
   (movimientos||[]).forEach(m => {
     if (!m.mes || !m.tarjeta) return;
     const t = m.tarjeta.toLowerCase();
     const key = t === 'icbc' ? 'icbc' : t === 'bna' ? 'bna' : null;
     if (!key) return;
-    const dolar = n(dolarTarjetaMap?.[m.mes]) || 0;
-    if (!out[m.mes]) out[m.mes] = {};
-    out[m.mes][key] = (out[m.mes][key] || 0) + montoEnPesos(m, dolar);
+    const dolar = n(dolarTarjetaMap?.[m.mes]) || 0;                 // el dólar es del mes del resumen
+    const destino = desfase ? mesDesplazado(m.mes, desfase) : m.mes;
+    if (!out[destino]) out[destino] = {};
+    out[destino][key] = (out[destino][key] || 0) + montoEnPesos(m, dolar);
   });
   return out;
 };
@@ -358,10 +366,10 @@ export const vehiculoDeGasto = (gastoId, gastoVehiculo, vehiculos) => {
 export const esCategoriaAuto = (categoria) => Object.values(GRUPOS_AUTO).some(g => g.categorias.includes(categoria));
 
 // ── Pagos de vencimientos y saldo vivo de la Uala ───────────────────
-const sumarMes = (key, delta) => { const [y, m] = key.split('-').map(Number); return getKey(new Date(y, m - 1 + delta, 1)); };
+export const mesDesplazado = (key, delta) => { const [y, m] = key.split('-').map(Number); return getKey(new Date(y, m - 1 + delta, 1)); };
 // Un vencimiento aparece desde el 25 del mes anterior al de su fecha (cuando llegan los resúmenes) y se
 // oculta cuando se paga o pasa.
-export const ventanaVencimiento = (fechaVenc) => `${sumarMes(fechaVenc.slice(0,7), -1)}-25`;
+export const ventanaVencimiento = (fechaVenc) => `${mesDesplazado(fechaVenc.slice(0,7), -1)}-25`;
 
 // Todos los pagos programados de los meses dados (cada uno con su fecha real de vencimiento, sin importar de
 // qué mes de Principal vienen). Estado: pagado = marcado a mano (fecha de pago = cuando se marcó) o ya pasó

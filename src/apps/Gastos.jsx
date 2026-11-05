@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import {
   $$, n, fmtK, getKey, fmtKey, getMonday, weekDates, dateStr, fmtDate, monthOpts,
-  itemsDelMes, itemsDeLaSemana, agruparItems, calcularTotalesTarjetas, resolverMes, esCategoriaAuto,
+  itemsDelMes, itemsDeLaSemana, agruparItems, calcularTotalesTarjetas, resolverMes, esCategoriaAuto, desfaseTarjetas, mesDesplazado, fechaVencimiento,
 } from '../utils.js';
 import {
   categorizarNuevos, emojiCorrectoParaCategoria, TIPOS_FINANCIEROS,
@@ -245,7 +245,7 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
   const sortedGrupos = Object.entries(agruparItems(items, categories)).sort((a,b)=>b[1].total-a[1].total);
 
   // Fijos del Principal: solo lectura acá (se editan en Principal).
-  const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, dolarMap);
+  const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, dolarMap, desfaseTarjetas(appData.ajustes));
   const fijos = resolverMes(appData.monthly || {}, appData.gastosRecurrentes || {}, totalesTarjetas, selMes).gastos;
   const FIJOS = [['prestamos','🏦 Préstamos'],['nicolas','👤 Nicolás'],['segundo','👤 Segundo'],['alquiler','🏠 Alquiler']].filter(([k]) => n(fijos[k]) > 0);
 
@@ -523,6 +523,12 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
               <div className="px-4 py-3.5">
                 <div className="text-[10px] text-muted-light uppercase font-bold tracking-wide">Total del resumen</div>
                 <div className="text-[26px] font-extrabold text-ink tracking-tight mb-2.5 tabular-nums">{$$(sum(movs))}</div>
+                {(() => {
+                  const mesPrincipal = mesDesplazado(selMes, desfaseTarjetas(appData.ajustes));
+                  const v = (appData.vencimientos || {})[key.toLowerCase()];
+                  const vence = v && n(v.dia) ? fechaVencimiento(mesPrincipal, v.dia, !!v.mesSiguiente) : null;
+                  return <div className="text-[11px] text-tab-tarjetas font-semibold mb-2">🗓️ Entra en el Principal de {fmtKey(mesPrincipal).split(' ')[0]}{vence ? ` · vence ${vence.split('-').reverse().slice(0,2).join('/')}` : ''}</div>;
+                })()}
                 <div className="flex gap-2.5 text-[11px] text-muted flex-wrap">
                   <span>🛍️ Consumos {$$(sum(consumos))}</span>
                   {cuotas.length>0 && <span>🧾 Cuotas {$$(sum(cuotas))}</span>}

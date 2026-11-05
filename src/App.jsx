@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { storage } from './storage.js';
 import {
-  calcularTotalesTarjetas, calcularFilasControl, dedupePorId, EMPTY_DATA, setOcultarMontos, hoy,
+  calcularTotalesTarjetas, desfaseTarjetas, calcularFilasControl, dedupePorId, EMPTY_DATA, setOcultarMontos, hoy,
 } from './utils.js';
 import { SyncEngine } from './sync.js';
 import { SkeletonHero, SkeletonRow } from './components/ui.jsx';
@@ -113,7 +113,7 @@ export default function App() {
       // Las filas de la hoja "Control 2026" se calculan ACÁ con las mismas funciones
       // que usa la pantalla; el servidor no recalcula nada.
       buildExtra: (data) => {
-        const totalesTarjetas = calcularTotalesTarjetas(tarjetasRef.current, data.dolarTarjeta);
+        const totalesTarjetas = calcularTotalesTarjetas(tarjetasRef.current, data.dolarTarjeta, desfaseTarjetas(data.ajustes));
         const ctx = { monthly:data.monthly, gastosRecurrentes:data.gastosRecurrentes, totalesTarjetas,
           uberDiDi:data.uberDiDi, zapiaData:zapiaRef.current, saldoJulieta:data.saldoJulieta, hoyStr:hoy() };
         return { filasControl: calcularFilasControl(ctx, new Date().toLocaleString('es-AR')) };

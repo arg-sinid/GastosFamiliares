@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   calcularConciliaciones, calcularPeriodoAbierto, calcularIngresoGerman, conciliarGerman,
   calcularResultadoMensual, calcularTotalesTarjetas, dedupePorId, itemsDelMes, itemsDeLaSemana,
-  agruparGastosPorCategoria, agruparItems, resumenAuto, calcularFilasControl, estadoUala, gastosZapiaDe, listarVencimientos, agruparPendientes, ventanaVencimiento, analizarGastosJulieta, esTransferencia,
+  agruparGastosPorCategoria, agruparItems, resumenAuto, calcularFilasControl, desfaseTarjetas, mesDesplazado, resolverMes, estadoUala, gastosZapiaDe, listarVencimientos, agruparPendientes, ventanaVencimiento, analizarGastosJulieta, esTransferencia,
   weekDates, getMonday, dateStr, hoy, calcularAhorroManual,
   ultimoSaldoDelMes, calcularTotalesMes, calcularVencimientos, fechaVencimiento, vehiculoDeGasto, esCategoriaAuto, resumenAutoMeses,
 } from '../src/utils.js';
@@ -327,4 +327,28 @@ test('conciliación: se declara en cualquier fecha y la diferencia sale de saldo
   const z = [ zap('2026-11-03','Julieta',100000,'transferencia'), zap('2026-11-05','Julieta',50000,'transferencia') ];
   const [p] = calcularConciliaciones(s, [], z);
   assert.equal(p.esperado, 590000); assert.equal(p.diferencia, -90000);           // hormiga de 90.000
+});
+
+// ── Tarjetas: el resumen de un mes se paga en el Principal del mes siguiente ──
+test('desfase de tarjetas: por defecto 1 y configurable', () => {
+  assert.equal(desfaseTarjetas(undefined), 1); assert.equal(desfaseTarjetas({}), 1);
+  assert.equal(desfaseTarjetas({ tarjetaDesfase: 0 }), 0); assert.equal(desfaseTarjetas({ tarjetaDesfase: '1' }), 1);
+  assert.equal(mesDesplazado('2026-12', 1), '2027-01'); assert.equal(mesDesplazado('2026-11', -1), '2026-10');
+});
+
+test('tarjetas: el resumen de octubre aparece en el Principal de noviembre (vence en diciembre) y no en el de octubre', () => {
+  const movs = [ { mes:'2026-10', tarjeta:'ICBC', importe:900000, moneda:'ARS' }, { mes:'2026-10', tarjeta:'BNA', importe:600000, moneda:'ARS' } ];
+  const con1 = calcularTotalesTarjetas(movs, {}, 1);
+  assert.deepEqual(con1, { '2026-11': { icbc:900000, bna:600000 } });
+  assert.deepEqual(calcularTotalesTarjetas(movs, {}, 0), { '2026-10': { icbc:900000, bna:600000 } });
+  const principalNov = resolverMes({}, {}, con1, '2026-11');
+  assert.equal(principalNov.gastos.icbc, '900000');
+  const v = listarVencimientos({ vencimientos:{ icbc:{ dia:3, mesSiguiente:true }, bna:{ dia:4, mesSiguiente:true } },
+    gastosDe: k => resolverMes({}, {}, con1, k).gastos, meses:['2026-11'], pagosFijos:{}, hoyStr:'2026-11-26' }).filter(i => i.visible);
+  assert.deepEqual(v.map(i => `${i.fecha} ${i.key} ${i.monto}`), ['2026-12-03 icbc 900000', '2026-12-04 bna 600000']);
+});
+
+test('tarjetas con dólar: el dólar es el del mes del resumen aunque cuente en el Principal siguiente', () => {
+  const movs = [ { mes:'2026-10', tarjeta:'ICBC', importe:10, moneda:'USD' } ];
+  assert.deepEqual(calcularTotalesTarjetas(movs, { '2026-10':1000, '2026-11':2000 }, 1), { '2026-11': { icbc:10000 } });
 });

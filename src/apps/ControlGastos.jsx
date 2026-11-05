@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
 import {
-  n, $$, fmtK, getKey, fmtKey, monthOpts, hoy, uid, fmtDate, VENCIMIENTO_MES_SIGUIENTE_DEFECTO,
+  n, $$, fmtK, getKey, fmtKey, monthOpts, hoy, uid, fmtDate, VENCIMIENTO_MES_SIGUIENTE_DEFECTO, desfaseTarjetas, mesDesplazado,
   calcularTotalesTarjetas, ultimoSaldoDelMes, estadoUala, gastosZapiaDe, calcularAhorroManual, listarVencimientos, agruparPendientes,
   calcularResultadoMensual, calcularTotalesMes, resolverMes, GASTOS_FIJOS_KEYS,
 } from '../utils.js';
@@ -190,7 +190,11 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
   const ahorroMovimientos = appData.ahorroMovimientos || [];
   const saldoJulieta = appData.saldoJulieta || {};
 
-  const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, dolarTarjetaMap);
+  // Los resúmenes de tarjeta se pagan después: con desfase 1, el Principal de noviembre usa el resumen de octubre.
+  const desfase = desfaseTarjetas(appData.ajustes);
+  const mesResumen = mesDesplazado(selKey, -desfase);
+  const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, dolarTarjetaMap, desfase);
+  const cambiarDesfase = (v) => saveData({ ...appData, ajustes: { ...(appData.ajustes || {}), tarjetaDesfase: Number(v) } });
   // Contexto único: TODAS las pantallas y la hoja Control calculan con esto.
   const ctx = { monthly:allData, gastosRecurrentes:recurrentes, totalesTarjetas, uberDiDi, zapiaData, saldoJulieta, hoyStr:hoy() };
 
@@ -359,6 +363,14 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
             <div className="bg-negative text-white px-4 py-2.5 font-bold text-[13px] flex justify-between">
               <span>📤 Gastos fijos</span><span className="text-[11px] opacity-80 font-normal">🔁 = recurrente</span>
             </div>
+            <div className="px-4 py-2 bg-[#EBF8FF] border-b border-[#BEE3F8] text-[11px] text-tab-tarjetas flex items-center gap-2 flex-wrap">
+              <span>💳 En {fmtKey(selKey)} se pagan los resúmenes de</span>
+              <select value={desfase} onChange={e=>cambiarDesfase(e.target.value)}
+                className="border-[1.5px] border-[#90CDF4] rounded-md bg-white text-tab-tarjetas font-bold text-[11px] px-1.5 py-1">
+                <option value={1}>el mes anterior ({fmtKey(mesDesplazado(selKey,-1)).split(' ')[0]})</option>
+                <option value={0}>el mismo mes ({fmtKey(selKey).split(' ')[0]})</option>
+              </select>
+            </div>
             {GASTOS_CONFIG.map((g, i) => {
               const isRec  = recurrentes[g.key] !== undefined;
               const fromCard = (g.key==='icbc'||g.key==='bna') && (totalesTarjetas[selKey]?.[g.key] !== undefined);
@@ -370,7 +382,8 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
                     <div className="flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[13px] text-ink font-medium">{g.label}</span>
-                        {fromCard && <span className="text-[10px] bg-[#BEE3F8] text-tab-tarjetas rounded px-1.5 py-0.5 font-bold">💳 de Gastos</span>}
+                        {fromCard && <span className="text-[10px] bg-[#BEE3F8] text-tab-tarjetas rounded px-1.5 py-0.5 font-bold">💳 resumen de {fmtKey(mesResumen).split(' ')[0]}</span>}
+                        {(g.key==='icbc'||g.key==='bna') && !fromCard && <span className="text-[10px] bg-border-soft text-muted rounded px-1.5 py-0.5 font-bold">sin resumen de {fmtKey(mesResumen).split(' ')[0]}</span>}
                         {!fromCard && isRec && <span className="text-[10px] bg-accent-soft text-accent-strong rounded px-1.5 py-0.5 font-bold">🔁 fijo</span>}
                       </div>
                       {g.hint && !fromCard && <div className="text-[11px] text-muted-light">{g.hint}</div>}
