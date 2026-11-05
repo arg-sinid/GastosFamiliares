@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   $$, n, getKey, getMonday, weekDates, dateStr, monthOf, fmtDate, hoy,
-  calcularConciliaciones, calcularPeriodoAbierto, aportesAUala, gastosZapiaDe, conciliarGerman,
+  calcularConciliaciones, calcularPeriodoAbierto, conciliarGerman, analizarGastosJulieta,
 } from '../utils.js';
 
 // Diferencia de conciliación: negativa = salió plata sin registrar (gasto hormiga),
@@ -40,6 +40,7 @@ export default function Control({ appData, saveData, zapiaData, onRefresh, mesKe
   const [monday, setMonday]   = useState(() => getMonday(today));
   const [saldoJuliInput, setSaldoJuliInput] = useState('');
   const [saving, setSaving]   = useState(false);
+  const [fechaCarga, setFechaCarga] = useState(hoy());     // Julieta puede declarar en cualquier fecha
   const [refreshing, setRefreshing] = useState(false);
 
   const handleRefresh = async () => { setRefreshing(true); await onRefresh?.(); setRefreshing(false); };
@@ -72,28 +73,31 @@ export default function Control({ appData, saveData, zapiaData, onRefresh, mesKe
 
   // ── Julieta: conciliación de la cuenta Uala
   const periodos = calcularConciliaciones(saldoJulieta, uberDiDi, zapiaData);
-  const periodoSemana = filtro === 'semana' ? periodos.find(p => p.fechaFin === sundayStr) : null;
-  const periodosMes   = filtro === 'mes' ? periodos.filter(p => p.fechaFin.slice(0,7) === mes) : [];
-  const hayConciliacion = filtro === 'semana' ? !!periodoSemana : periodosMes.length > 0;
+  // Los períodos se identifican por la fecha de cierre (la carga del saldo real), que puede ser cualquier día.
+  const periodosRango = periodos.filter(p => filtro === 'semana' ? wStr.includes(p.fechaFin) : p.fechaFin.slice(0,7) === mes);
+  const hayConciliacion = periodosRango.length > 0;
   const abierto = calcularPeriodoAbierto(saldoJulieta, uberDiDi, zapiaData, hoyStr);
   const mostrarAbierto = !hayConciliacion && abierto && (filtro === 'semana' || mes === hoyStr.slice(0,7));
-  const suma = (campo) => periodosMes.reduce((s,p) => s + p[campo], 0);
-  const vista = filtro === 'semana' ? periodoSemana : (periodosMes.length ? {
-    saldoIni: periodosMes[0].saldoIni, saldoReal: periodosMes[periodosMes.length-1].saldoReal,
+  const suma = (campo) => periodosRango.reduce((s,p) => s + p[campo], 0);
+  const vista = hayConciliacion ? {
+    saldoIni: periodosRango[0].saldoIni, saldoReal: periodosRango[periodosRango.length-1].saldoReal,
     transferido: suma('transferido'), deposito: suma('deposito'), gastosJulieta: suma('gastosJulieta'),
-    esperado: periodosMes[periodosMes.length-1].esperado, diferencia: suma('diferencia'),
-  } : null);
+    esperado: periodosRango[periodosRango.length-1].esperado, diferencia: suma('diferencia'),
+  } : null;
 
-  const saldoActual = filtro === 'semana'
-    ? saldoJulieta[sundayStr]
-    : (() => { const ks = Object.keys(saldoJulieta).filter(k => monthOf(k) === mes).sort(); return ks.length ? saldoJulieta[ks[ks.length-1]] : undefined; })();
-  const fechaSaldo = filtro === 'semana' ? sundayStr : (Object.keys(saldoJulieta).filter(k => monthOf(k) === mes).sort().pop() || sundayStr);
+  const fechasRango = Object.keys(saldoJulieta).filter(k => filtro === 'semana' ? wStr.includes(k) : monthOf(k) === mes).sort();
+  const fechaSaldo = fechasRango.length ? fechasRango[fechasRango.length-1] : null;
+  const saldoActual = fechaSaldo ? saldoJulieta[fechaSaldo] : undefined;
+
+  // Qué gastos de Julieta restan del saldo desde la última carga y cuáles no (y por qué).
+  const desdeCarga = abierto?.fechaInicio || (fechaSaldo || '');
+  const analisis = desdeCarga ? analizarGastosJulieta(zapiaData, desdeCarga, hoyStr) : null;
 
   const guardarSaldoJuli = async () => {
-    if (!saldoJuliInput) return;
+    if (!saldoJuliInput || !fechaCarga) return;
     setSaving(true);
     // Una carga por fecha: volver a cargar el mismo día reemplaza, no suma otra conciliación.
-    await saveData({ ...appData, saldoJulieta: { ...saldoJulieta, [sundayStr]: n(saldoJuliInput) } });
+    await saveData({ ...appData, saldoJulieta: { ...saldoJulieta, [fechaCarga]: n(saldoJuliInput) } });
     setSaldoJuliInput(''); setSaving(false);
   };
 
@@ -154,9 +158,9 @@ export default function Control({ appData, saveData, zapiaData, onRefresh, mesKe
         {hayConciliacion && vista ? (
           <>
             <LineaInfo label="Saldo real anterior" valor={vista.saldoIni} color="var(--color-muted)"/>
-            <LineaInfo label="Transferencias del período" valor={vista.transferido} color="var(--color-tab-tarjetas)"/>
+            <LineaInfo label="Gastos de Julieta por transferencia (Zapia)" valor={vista.gastosJulieta} color="var(--color-tab-gastos)"/>
+            {vista.transferido > 0 && <LineaInfo label="Transferencias de Germán a la Uala" valor={vista.transferido} color="var(--color-tab-tarjetas)"/>}
             {vista.deposito > 0 && <LineaInfo label="Depósito de fin de mes" valor={vista.deposito} color="var(--color-tab-tarjetas)"/>}
-            <LineaInfo label="Gastos de Julieta (Zapia)" valor={vista.gastosJulieta} color="var(--color-tab-gastos)"/>
             <LineaInfo label="Saldo esperado" valor={vista.esperado} color="var(--color-ink)"/>
             <LineaInfo label="Saldo real informado" valor={vista.saldoReal} color="var(--color-ink)"/>
             <DiferenciaCard label="Diferencia de conciliación" diferencia={vista.diferencia}/>
@@ -164,12 +168,12 @@ export default function Control({ appData, saveData, zapiaData, onRefresh, mesKe
         ) : mostrarAbierto ? (
           <>
             <LineaInfo label={`Saldo real cargado el ${fmtDate(new Date(abierto.fechaInicio+'T12:00:00'))}`} valor={abierto.saldoIni} color="var(--color-muted)"/>
-            <LineaInfo label="Transferido desde esa carga" valor={abierto.transferido} color="var(--color-tab-tarjetas)"/>
+            <LineaInfo label="Gastos de Julieta por transferencia desde esa carga" valor={abierto.gastosJulieta} color="var(--color-tab-gastos)"/>
+            {abierto.transferido > 0 && <LineaInfo label="Transferencias de Germán desde esa carga" valor={abierto.transferido} color="var(--color-tab-tarjetas)"/>}
             {abierto.deposito > 0 && <LineaInfo label="Depósito de fin de mes" valor={abierto.deposito} color="var(--color-tab-tarjetas)"/>}
-            <LineaInfo label="Gastos de Julieta (Zapia)" valor={abierto.gastosJulieta} color="var(--color-tab-gastos)"/>
             <LineaInfo label="Saldo esperado a hoy" valor={abierto.saldoEstimado} color="var(--color-ink)"/>
             <div className="px-4 py-2.5 text-[11px] text-accent-strong border-t border-border-soft bg-[#FFFBF5]">
-              ⏳ Período abierto: la diferencia se calcula cuando Julieta cargue su saldo real.
+              ⏳ Período abierto: cuando Julieta cargue su saldo real, la diferencia contra este esperado es el gasto hormiga.
             </div>
           </>
         ) : (
@@ -180,25 +184,57 @@ export default function Control({ appData, saveData, zapiaData, onRefresh, mesKe
           </div>
         )}
 
+        {analisis && (
+          <details className="border-t border-border-soft">
+            <summary className="px-4 py-2.5 text-[12px] font-semibold text-muted cursor-pointer">
+              🔎 Qué gastos de Julieta restan desde la carga del {fmtDate(new Date(desdeCarga+'T12:00:00'))}
+              <span className="text-muted-light font-normal"> · restan {analisis.restan.length}</span>
+            </summary>
+            <div className="px-4 pb-3 text-[11px]">
+              {[
+                ['✅ Restan (transferencia, posteriores a la carga)', analisis.restan, 'text-positive'],
+                ['🕐 Del mismo día de la carga (ya están en el saldo declarado)', analisis.mismoDia, 'text-muted'],
+                ['💵 No restan: no son transferencia', analisis.otroMedio, 'text-accent-strong'],
+                ['❓ Sin identificar quién los cargó', analisis.sinIdentificar, 'text-negative'],
+              ].map(([titulo, lista, color]) => lista.length > 0 && (
+                <div key={titulo} className="mb-2">
+                  <div className={`font-bold ${color}`}>{titulo}</div>
+                  {lista.map(r => (
+                    <div key={r.id} className="flex justify-between text-muted pl-2">
+                      <span>{fmtDate(new Date(r.fecha+'T12:00:00'))} · {r.que} · {r.medio || 's/medio'}{r.quien !== 'Julieta' ? ` · ${r.quien}` : ''}</span>
+                      <span className="tabular-nums">{$$(r.costo)}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {analisis.restan.length + analisis.mismoDia.length + analisis.otroMedio.length + analisis.sinIdentificar.length === 0 && (
+                <div className="text-muted-light">No hay gastos de Julieta cargados desde esa fecha en Zapia.</div>
+              )}
+            </div>
+          </details>
+        )}
+
         <div className="px-4 py-3 border-t border-border-soft">
-          <div className="text-xs text-muted mb-2 font-semibold">💳 Saldo real de Uala — domingo {fmtDate(sunday)}</div>
+          <div className="text-xs text-muted mb-2 font-semibold">💳 Saldo real de Uala que declara Julieta (cualquier día)</div>
           {saldoActual > 0 && !saldoJuliInput && (
             <div className="text-sm font-bold text-ink mb-2">
-              Registrado ({fmtDate(new Date(fechaSaldo+'T12:00:00'))}): {$$(saldoActual)}
-              <button onClick={() => setSaldoJuliInput(String(saldoActual))}
+              Último declarado ({fmtDate(new Date(fechaSaldo+'T12:00:00'))}): {$$(saldoActual)}
+              <button onClick={() => { setSaldoJuliInput(String(saldoActual)); setFechaCarga(fechaSaldo); }}
                 className="ml-2.5 border-none bg-border-soft rounded-md cursor-pointer text-[11px] text-muted px-2 py-0.5 touch-manipulation">editar</button>
             </div>
           )}
+          <input type="date" value={fechaCarga} max={hoy()} onChange={e => setFechaCarga(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border-[1.5px] border-border text-sm outline-none text-ink bg-white mb-2"/>
           <div className="flex gap-2">
             <div className={`flex-1 flex items-center bg-[#FAFAFA] rounded-lg border-[1.5px] px-3 py-1.5 gap-1 ${saldoJuliInput?'border-julieta':'border-border'}`}>
               <span className="text-muted-light font-semibold">$</span>
               <input type="number" inputMode="numeric" min="0" value={saldoJuliInput} onChange={e => setSaldoJuliInput(e.target.value)} placeholder="0"
                 className="flex-1 border-none outline-none text-lg font-bold text-ink bg-transparent tabular-nums"/>
             </div>
-            <button onClick={guardarSaldoJuli} disabled={!saldoJuliInput || saving}
+            <button onClick={guardarSaldoJuli} disabled={!saldoJuliInput || !fechaCarga || saving}
               className={`px-4 py-2 border-none rounded-lg cursor-pointer font-bold text-[13px] text-white touch-manipulation ${saving ? 'bg-muted-light' : 'bg-julieta'}`}>{saving ? '...' : 'Guardar'}</button>
           </div>
-          <div className="text-[11px] text-muted-light mt-1.5">Lo carga Julieta el domingo. Cada saldo real es el punto de partida de la conciliación siguiente.</div>
+          <div className="text-[11px] text-muted-light mt-1.5">Puede cargarlo cualquier día. Sobre ese saldo se descuentan sus gastos por transferencia; lo que no cierre en la próxima carga es gasto hormiga.</div>
         </div>
       </div>
 

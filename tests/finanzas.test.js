@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   calcularConciliaciones, calcularPeriodoAbierto, calcularIngresoGerman, conciliarGerman,
   calcularResultadoMensual, calcularTotalesTarjetas, dedupePorId, itemsDelMes, itemsDeLaSemana,
-  agruparGastosPorCategoria, agruparItems, resumenAuto, calcularFilasControl, estadoUala, gastosZapiaDe,
+  agruparGastosPorCategoria, agruparItems, resumenAuto, calcularFilasControl, estadoUala, gastosZapiaDe, listarVencimientos, agruparPendientes, ventanaVencimiento, analizarGastosJulieta, esTransferencia,
   weekDates, getMonday, dateStr, hoy, calcularAhorroManual,
   ultimoSaldoDelMes, calcularTotalesMes, calcularVencimientos, fechaVencimiento, vehiculoDeGasto, esCategoriaAuto, resumenAutoMeses,
 } from '../src/utils.js';
@@ -245,70 +245,86 @@ test('categorías de auto reconocidas para pedir vehículo', () => {
   assert.equal(esCategoriaAuto('Supermercado'), false);
 });
 
-// ── Saldo vivo de la Uala ────────────────────────────────────────────
-const grupos2 = [ { fecha:'2026-11-03', total:1200000 }, { fecha:'2026-11-04', total:600000 } ];
-const base2 = { sueldo:1600000, fijos:2500000, saldoDeclarado:1975000, fechaDeclaracion:'2026-11-01', grupos:grupos2 };
+// ── Vencimientos con ventana, pagos marcados y saldo vivo ────────────
+const ventOct = { icbc:{ dia:3, mesSiguiente:true }, prestamos:{ dia:3, mesSiguiente:true }, bna:{ dia:4, mesSiguiente:true } };
+const gastosDe = k => ({ '2026-10': { icbc:'900000', prestamos:'300000', bna:'600000' }, '2026-11': { segundo:'330000', alquiler:'900000' } }[k] || {});
+const ventNov = { ...ventOct, segundo:{ dia:4, mesSiguiente:true }, alquiler:{ dia:10, mesSiguiente:true } };
+const lista = (hoyStr, pagosFijos = {}) => listarVencimientos({ vencimientos:ventNov, gastosDe, meses:['2026-10','2026-11','2026-12'], pagosFijos, hoyStr });
 
-test('saldo vivo: antes del primer vencimiento queda igual al declarado', () => {
-  const r = estadoUala({ ...base2, hoyStr:'2026-11-02' });
-  assert.equal(r.ualaHoy, 1975000); assert.equal(r.julietaHoy, 1600000); assert.equal(r.pagadoDespues, 0);
+test('vencimientos: aparecen desde el 25 del mes anterior al de su fecha y no antes', () => {
+  assert.equal(ventanaVencimiento('2026-12-04'), '2026-11-25');
+  assert.equal(ventanaVencimiento('2027-01-03'), '2026-12-25');
+  const antes = lista('2026-11-24').filter(i => i.visible);
+  assert.equal(antes.length, 0);   // los de noviembre ya pasaron; los de diciembre todavía no aparecen
+  const dia25 = lista('2026-11-25').filter(i => i.visible);
+  assert.deepEqual(dia25.map(i => i.fecha), ['2026-12-04','2026-12-10']);
 });
 
-test('saldo vivo: los vencimientos pagados salen primero del sueldo de Julieta y después de la Uala', () => {
-  const dia4 = estadoUala({ ...base2, hoyStr:'2026-11-04' });          // pagó el del 3 (1.200.000): lo cubre el sueldo
-  assert.equal(dia4.julietaHoy, 400000); assert.equal(dia4.ualaHoy, 1975000);
-  const dia5 = estadoUala({ ...base2, hoyStr:'2026-11-05' });          // pagó también el del 4 (600.000): 400.000 sueldo + 200.000 Uala
-  assert.equal(dia5.julietaHoy, 0); assert.equal(dia5.ualaHoy, 1775000);
-  assert.equal(dia5.disponibleHoy, 1775000);
+test('vencimientos: el 3/11 se ven primero los de noviembre (los más cercanos), no los de diciembre', () => {
+  const v = lista('2026-11-03').filter(i => i.visible);
+  assert.deepEqual(v.map(i => `${i.fecha} ${i.key}`), ['2026-11-03 icbc','2026-11-03 prestamos','2026-11-04 bna']);
+  const g = agruparPendientes(lista('2026-11-03'), 2000000);
+  assert.equal(g[0].total, 1200000); assert.equal(g[1].acumulado, 1800000); assert.equal(g[1].balance, 200000);
 });
 
-test('saldo vivo: lo vencido antes de la declaración ya está en el saldo declarado (solo gastó sueldo)', () => {
-  const r = estadoUala({ ...base2, fechaDeclaracion:'2026-11-03', hoyStr:'2026-11-05' });
-  assert.equal(r.julietaHoy, 0);   // sueldo 1.6M − 1.2M (antes) = 400k; el del 4 gasta esos 400k y 200k salen de la Uala
-  assert.equal(r.ualaHoy, 1975000 - 200000);
+test('vencimientos: marcar un pago lo oculta y deja de contar como pendiente', () => {
+  const v = lista('2026-11-03', { '2026-10|icbc': { fecha:'2026-11-02' } }).filter(i => i.visible);
+  assert.deepEqual(v.map(i => i.key), ['prestamos','bna']);
 });
 
-test('saldo vivo: mes nuevo sin declaración → la Uala puede quedar negativa y se muestra lo que falta pagar', () => {
-  const r = estadoUala({ sueldo:1600000, fijos:2500000, saldoDeclarado:null, fechaDeclaracion:'', grupos:grupos2, hoyStr:'2026-11-05' });
-  assert.equal(r.ualaHoy, -200000);                 // pagó 1.800.000 con 1.600.000 de sueldo
-  assert.equal(r.faltaPagar, 700000);               // 2.500.000 − 1.800.000
-  assert.equal(r.ualaFinal, -900000);               // mismo reparto que repartirFijos: sueldo primero, el resto de la Uala
+test('vencimientos: cuando pasaron todos (o están marcados) no queda nada visible', () => {
+  assert.equal(lista('2026-11-05').filter(i => i.visible).length, 0);          // hasta el 25/11 no aparecen los de diciembre
+  const marcados = { '2026-10|icbc':{fecha:'2026-11-02'}, '2026-10|prestamos':{fecha:'2026-11-02'}, '2026-10|bna':{fecha:'2026-11-02'} };
+  assert.equal(lista('2026-11-03', marcados).filter(i => i.visible).length, 0);
 });
 
-test('saldo vivo: sin vencimientos cargados no se mueve (comportamiento anterior)', () => {
-  const r = estadoUala({ sueldo:1000, fijos:500, saldoDeclarado:300, fechaDeclaracion:'2026-11-01', grupos:[], hoyStr:'2026-11-20' });
-  assert.equal(r.ualaHoy, 300); assert.equal(r.faltaPagar, 500);
+const pagosNov = hoyStr => lista(hoyStr).filter(i => i.pagado).map(i => ({ fecha:i.fechaPago, monto:i.monto }));
+const baseUala = { saldoDeclarado:740000, fechaDeclaracion:'2026-11-01', mesKey:'2026-11' };
+
+test('saldo vivo: antes de que llegue el primer vencimiento queda igual al declarado', () => {
+  const r = estadoUala({ ...baseUala, pagos:pagosNov('2026-11-03'), sueldoPorMes:{ '2026-11':1000000 } });
+  assert.equal(r.ualaHoy, 740000); assert.equal(r.sueldoRestante, 1000000);
 });
 
-test('calcularVencimientos expone todos los grupos para calcular lo ya pagado', () => {
-  const r = calcularVencimientos({ vencimientos:venc, gastos:gastosOct, mesKey:'2026-10', hoyStr:'2026-11-04', disponible:0 });
-  assert.equal(r.todos.length, 2);
+test('saldo vivo: cada pago sale primero del sueldo de Julieta y, agotado, de la Uala', () => {
+  const r = estadoUala({ ...baseUala, pagos:pagosNov('2026-11-05'), sueldoPorMes:{ '2026-11':1000000 } });
+  assert.equal(r.pagadoDespues, 1800000); assert.equal(r.deUala, 800000);
+  assert.equal(r.sueldoRestante, 0); assert.equal(r.ualaHoy, -60000);            // negativa hasta que Julieta declare de nuevo
 });
 
-// ── Opción B: pagos del mes anterior y gastos de Julieta por transferencia ──
-const prevOct = { sueldo:1000000, grupos:[ { fecha:'2026-11-03', total:1200000 }, { fecha:'2026-11-04', total:600000 } ], desde:'2026-11-01' };
-const novBase = { sueldo:0, fijos:1347000, saldoDeclarado:740000, fechaDeclaracion:'2026-11-01', grupos:[ { fecha:'2026-12-04', total:330000 } ], mesAnterior:prevOct };
-
-test('mes anterior: antes de que lleguen los vencimientos de octubre, el saldo declarado no se mueve', () => {
-  const r = estadoUala({ ...novBase, hoyStr:'2026-11-03' });            // el 3/11 todavía "vence hoy"
-  assert.equal(r.ualaHoy, 740000); assert.equal(r.anteriorPagado, 0);
+test('saldo vivo: sin sueldo cargado en el mes, todo sale de la Uala', () => {
+  assert.equal(estadoUala({ ...baseUala, pagos:pagosNov('2026-11-05'), sueldoPorMes:{} }).ualaHoy, 740000 - 1800000);
 });
 
-test('mes anterior: las tarjetas de octubre pagadas en noviembre salen primero del sueldo de octubre y luego de la Uala', () => {
-  const r = estadoUala({ ...novBase, hoyStr:'2026-11-05' });            // pagó 1.800.000: 1.000.000 sueldo + 800.000 Uala
-  assert.equal(r.anteriorPagado, 1800000); assert.equal(r.anteriorDeUala, 800000);
-  assert.equal(r.ualaHoy, -60000);                                      // queda negativa hasta que Julieta declare de nuevo
+test('saldo vivo: un pago marcado antes de su vencimiento también baja el saldo (con el sueldo del mes en que se paga)', () => {
+  const l = lista('2026-11-26', { '2026-11|segundo': { fecha:'2026-11-26' } });
+  const pagos = l.filter(i => i.pagado).map(i => ({ fecha:i.fechaPago, monto:i.monto }));
+  const r = estadoUala({ ...baseUala, pagos, sueldoPorMes:{ '2026-11':100000 } });
+  assert.equal(r.deUala, 1800000 + 330000 - 100000);
 });
 
-test('mes anterior: un pago de octubre anterior a la declaración ya está en el saldo declarado', () => {
-  const r = estadoUala({ ...novBase, grupos:[], fechaDeclaracion:'2026-11-03', hoyStr:'2026-11-05' });
-  assert.equal(r.anteriorPagado, 600000);                               // solo el del 4/11 es posterior; el del 3/11 ya estaba reflejado
-  assert.equal(r.anteriorDeUala, 600000);                               // el del 3/11 (1.200.000) ya agotó el sueldo de octubre (1.000.000); el del 4/11 sale entero de la Uala
+test('saldo vivo: los pagos anteriores a la declaración ya están en el saldo declarado (solo gastaron sueldo)', () => {
+  const r = estadoUala({ saldoDeclarado:740000, fechaDeclaracion:'2026-11-03', mesKey:'2026-11', pagos:pagosNov('2026-11-05'), sueldoPorMes:{ '2026-11':1000000 } });
+  assert.equal(r.deUala, 600000 + 0);                // 3/11: 1.200.000 gastó el sueldo (1.000.000) y 200.000 ya estaban en el saldo; el del 4/11 sale entero de la Uala
 });
 
-test('los gastos de Julieta por transferencia posteriores a la declaración bajan el saldo; los de efectivo no', () => {
-  const z = [ zap('2026-11-02','Julieta',20000,'transferencia'), zap('2026-11-02','Julieta',50000,'efectivo'), zap('2026-11-02','Germán',70000,'transferencia'), zap('2026-10-31','Julieta',9000,'transferencia') ];
+test('saldo vivo: los gastos de Julieta por transferencia posteriores a la declaración bajan el saldo', () => {
+  const z = [ zap('2026-11-02','Julieta',20000,'transferencia'), zap('2026-11-02','Julieta',50000,'efectivo'), zap('2026-10-31','Julieta',9000,'transferencia') ];
   const gastosUala = gastosZapiaDe(z, 'Julieta', '2026-11-01', '2026-11-03', 'transferencia');
-  assert.equal(gastosUala, 20000);                                      // el del 31/10 es anterior a la declaración
-  assert.equal(estadoUala({ ...novBase, mesAnterior:null, gastosUala, hoyStr:'2026-11-03' }).ualaHoy, 720000);
+  assert.equal(gastosUala, 20000);
+  assert.equal(estadoUala({ ...baseUala, pagos:[], sueldoPorMes:{}, gastosUala }).ualaHoy, 720000);
+});
+
+test('Zapia: "transferencia" se reconoce por la raíz y se explica por qué un gasto resta o no', () => {
+  assert.ok(esTransferencia('Transferencia')); assert.ok(esTransferencia('transf. bancaria')); assert.equal(esTransferencia('efectivo'), false);
+  const z = [ zap('2026-11-01','Julieta',100,'efectivo'), zap('2026-11-02','Julieta',200,'transferencia'), zap('2026-11-02','Julieta',300,'efectivo'), { ...zap('2026-11-03','Juli',400,'transferencia') } ];
+  const a = analizarGastosJulieta(z, '2026-11-01', '2026-11-05');
+  assert.equal(a.restan.length, 1); assert.equal(a.mismoDia.length, 1); assert.equal(a.otroMedio.length, 1); assert.equal(a.sinIdentificar.length, 1);
+});
+
+test('conciliación: se declara en cualquier fecha y la diferencia sale de saldo anterior − gastos por transferencia', () => {
+  const s = { '2026-11-01':740000, '2026-11-07':500000 };
+  const z = [ zap('2026-11-03','Julieta',100000,'transferencia'), zap('2026-11-05','Julieta',50000,'transferencia') ];
+  const [p] = calcularConciliaciones(s, [], z);
+  assert.equal(p.esperado, 590000); assert.equal(p.diferencia, -90000);           // hormiga de 90.000
 });

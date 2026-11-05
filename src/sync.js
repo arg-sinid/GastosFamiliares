@@ -6,7 +6,7 @@
 // reintenta. Nunca se pisa un cambio ajeno con una copia vieja.
 import { normalizarAppData } from './utils.js';
 
-const MAP_FIELDS  = ['monthly','categories','gastosRecurrentes','saldoJulieta','dolarTarjeta','autoDetalle','vencimientos','gastoVehiculo'];
+const MAP_FIELDS  = ['monthly','categories','gastosRecurrentes','saldoJulieta','dolarTarjeta','autoDetalle','vencimientos','gastoVehiculo','pagosFijos'];
 const LIST_FIELDS = { uberDiDi:'fecha', ahorroMovimientos:null, vehiculos:null }; // campo de orden desc (o null)
 
 const isPlain = v => v !== null && typeof v === 'object' && !Array.isArray(v);

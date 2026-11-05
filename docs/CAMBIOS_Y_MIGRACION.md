@@ -75,3 +75,18 @@ Sacá captura de Principal (Historial) de los últimos meses ANTES de actualizar
 - **Pagos del mes anterior (opción B):** los vencimientos del mes anterior que caen dentro del mes que se mira (por ejemplo las tarjetas de octubre pagadas el 3 y 4/11) se restan del saldo de la Uala a partir del día siguiente a su fecha, y solo si son posteriores a la declaración del domingo. Salen primero del sueldo de su propio mes (octubre) y después de la Uala. La Uala puede quedar negativa hasta que Julieta declare de nuevo. Los anteriores a la declaración ya están reflejados en ese saldo.
 - **Gastos de Julieta por Zapia:** de la Uala solo salen los cargados por Julieta en modo **transferencia** (en la conciliación de Control y en el saldo de Principal). Los de efectivo y los de Germán no restan. En Principal bajan el saldo los posteriores a la declaración.
 - No cambia el resultado mensual (sueldo + saldo declarado − fijos) ni el ahorro manual.
+
+## v5.6 — Principal reordenado, vencimientos con "Pagado" y Control corregido
+**Principal → Mes**
+- Orden nuevo: (1) Vencimientos, solo cuando corresponde; (2) Ingresos familiares; (3) Gastos fijos, con el resultado mensual como una línea al pie. Se quitaron de esta pestaña la tarjeta grande de resultado, el banner de ahorro (sigue en Ahorros) y el bloque "Cómo se van pagando".
+- **Vencimientos globales:** se listan por fecha real, los más cercanos primero, aunque vengan de otro mes de Principal (las tarjetas de octubre que se pagan el 3 y 4/11 salen antes que los de diciembre).
+- **Ventana:** cada vencimiento aparece desde el 25 del mes anterior al de su fecha y se oculta cuando se paga o pasa su fecha. Si no queda ninguno visible, la tarjeta desaparece y solo se ven ingresos y gastos fijos.
+- **Marcar pagado:** cada ítem tiene "✓ Pagado" (se puede deshacer). Un pago marcado deja de ser pendiente y, desde ese día, baja el saldo.
+- **Saldo de la Uala:** cada pago (marcado o ya vencido) sale primero del sueldo de Julieta del MES EN QUE SE PAGA y después de la Uala. Los pagos anteriores a la declaración ya están reflejados en el saldo declarado. También bajan el saldo los gastos de Zapia de Julieta en modo transferencia posteriores a la declaración. Puede quedar negativo hasta que Julieta declare de nuevo.
+- Nuevo dato guardado: `pagosFijos` (id `mes|gasto` → fecha de pago). Se sincroniza entre celulares.
+
+**Control**
+- Julieta puede declarar el saldo **cualquier día** (selector de fecha; antes estaba atado al domingo). Semana/Mes muestran las conciliaciones cuyo cierre cae en ese período.
+- Sobre el saldo declarado se descuentan sus gastos de Zapia **por transferencia**; "transferencia" se reconoce por la raíz (transferencia, transf., etc.). La diferencia contra el próximo saldo declarado es el gasto hormiga (negativa) o sobrante (positiva).
+- Se quitó la fila "Transferido desde esa carga" cuando es 0 (aparece solo si Germán transfirió).
+- Nuevo desplegable **🔎 Qué gastos de Julieta restan**: lista los que restan, los del mismo día de la carga (ya incluidos en el saldo), los que no son transferencia y los que no se pudo identificar quién cargó. Sirve para ver por qué un gasto no está restando.

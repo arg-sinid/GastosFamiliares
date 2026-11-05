@@ -36,7 +36,7 @@ const HEADERS_CONTROL = [
 
 const emptyData = () => ({ monthly:{}, categories:{}, uberDiDi:[], gastosRecurrentes:{},
   saldoJulieta:{}, dolarTarjeta:{}, ahorroMovimientos:[], autoDetalle:{},
-  vencimientos:{}, vehiculos:[], gastoVehiculo:{} });
+  vencimientos:{}, vehiculos:[], gastoVehiculo:{}, pagosFijos:{} });
 
 function json(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
