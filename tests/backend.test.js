@@ -140,3 +140,20 @@ test('restaurarBackup vuelve a dejar el estado del backup como versión nueva', 
   ctx.restaurarBackup(r.backup);
   const s = get('appdata'); assert.equal(s.version, 2); assert.equal(s.data.uberDiDi[0].id, 'a');
 });
+
+test('v6.1: escribe las hojas legibles derivadas, descarta filas inválidas e ignora nombres que no están en la lista', () => {
+  const { post, hojas } = crearEntorno();
+  const d = vacio(); d.monthly['2026-10'] = {};
+  const r = post({ baseVersion:0, data:d, hojasExtra:{
+    'Saldos Uala': { headers:['Fecha','Saldo real declarado'], rows:[ ['2026-11-01', 740000], ['fila corta'] ] },
+    'Hoja rara':   { headers:['x'], rows:[[1]] },
+  } });
+  assert.equal(r.status, 'ok'); assert.equal(r.hojasOk, true);
+  assert.equal(hojas['Saldos Uala'].celdas.get('1,1'), 'Fecha');
+  assert.equal(hojas['Saldos Uala'].celdas.get('2,2'), 740000);
+  assert.equal(hojas['Saldos Uala'].celdas.get('3,1'), undefined);
+  assert.equal(hojas['Hoja rara'], undefined);
+  // un segundo guardado reescribe sin dejar filas viejas
+  post({ baseVersion:1, data:d, hojasExtra:{ 'Saldos Uala': { headers:['Fecha','Saldo real declarado'], rows:[ ['2026-11-08', 500000] ] } } });
+  assert.equal(hojas['Saldos Uala'].celdas.get('2,1'), '2026-11-08');
+});

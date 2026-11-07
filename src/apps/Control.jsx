@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   $$, n, getKey, getMonday, weekDates, dateStr, monthOf, fmtDate, hoy,
-  calcularConciliaciones, calcularPeriodoAbierto, conciliarGerman, analizarGastosJulieta,
+  calcularConciliaciones, calcularPeriodoAbierto, conciliarGerman,
 } from '../utils.js';
 
 // Diferencia de conciliación: negativa = salió plata sin registrar (gasto hormiga),
@@ -41,6 +41,7 @@ export default function Control({ appData, saveData, zapiaData, onRefresh, mesKe
   const [saldoJuliInput, setSaldoJuliInput] = useState('');
   const [saving, setSaving]   = useState(false);
   const [fechaCarga, setFechaCarga] = useState(hoy());     // Julieta puede declarar en cualquier fecha
+  const [edit, setEdit] = useState(null);                    // edición de un saldo ya declarado: { fecha, nuevaFecha, monto }
   const [refreshing, setRefreshing] = useState(false);
 
   const handleRefresh = async () => { setRefreshing(true); await onRefresh?.(); setRefreshing(false); };
@@ -89,16 +90,28 @@ export default function Control({ appData, saveData, zapiaData, onRefresh, mesKe
   const fechaSaldo = fechasRango.length ? fechasRango[fechasRango.length-1] : null;
   const saldoActual = fechaSaldo ? saldoJulieta[fechaSaldo] : undefined;
 
-  // Qué gastos de Julieta restan del saldo desde la última carga y cuáles no (y por qué).
-  const desdeCarga = abierto?.fechaInicio || (fechaSaldo || '');
-  const analisis = desdeCarga ? analizarGastosJulieta(zapiaData, desdeCarga, hoyStr) : null;
-
   const guardarSaldoJuli = async () => {
     if (!saldoJuliInput || !fechaCarga) return;
     setSaving(true);
     // Una carga por fecha: volver a cargar el mismo día reemplaza, no suma otra conciliación.
     await saveData({ ...appData, saldoJulieta: { ...saldoJulieta, [fechaCarga]: n(saldoJuliInput) } });
     setSaldoJuliInput(''); setSaving(false);
+  };
+
+  const todasLasCargas = Object.keys(saldoJulieta).sort().reverse();
+  const fdl = f => f.split('-').reverse().join('/');
+  const guardarEdicion = async () => {
+    if (!edit || !edit.nuevaFecha || edit.monto === '') return;
+    const nx = { ...saldoJulieta };
+    if (edit.nuevaFecha !== edit.fecha && nx[edit.nuevaFecha] !== undefined && !window.confirm(`Ya hay un saldo cargado el ${fdl(edit.nuevaFecha)}. ¿Reemplazarlo?`)) return;
+    delete nx[edit.fecha]; nx[edit.nuevaFecha] = n(edit.monto);
+    await saveData({ ...appData, saldoJulieta: nx });
+    setEdit(null);
+  };
+  const borrarCarga = async (fecha) => {
+    if (!window.confirm(`¿Borrar el saldo declarado del ${fdl(fecha)} (${$$(saldoJulieta[fecha])})?`)) return;
+    const nx = { ...saldoJulieta }; delete nx[fecha];
+    await saveData({ ...appData, saldoJulieta: nx });
   };
 
   const prevWeek = () => { const d=new Date(monday); d.setDate(d.getDate()-7); setMonday(d); };
@@ -184,36 +197,6 @@ export default function Control({ appData, saveData, zapiaData, onRefresh, mesKe
           </div>
         )}
 
-        {analisis && (
-          <details className="border-t border-border-soft">
-            <summary className="px-4 py-2.5 text-[12px] font-semibold text-muted cursor-pointer">
-              🔎 Qué gastos de Julieta restan desde la carga del {fmtDate(new Date(desdeCarga+'T12:00:00'))}
-              <span className="text-muted-light font-normal"> · restan {analisis.restan.length}</span>
-            </summary>
-            <div className="px-4 pb-3 text-[11px]">
-              {[
-                ['✅ Restan (transferencia, posteriores a la carga)', analisis.restan, 'text-positive'],
-                ['🕐 Del mismo día de la carga (ya están en el saldo declarado)', analisis.mismoDia, 'text-muted'],
-                ['💵 No restan: no son transferencia', analisis.otroMedio, 'text-accent-strong'],
-                ['❓ Sin identificar quién los cargó', analisis.sinIdentificar, 'text-negative'],
-              ].map(([titulo, lista, color]) => lista.length > 0 && (
-                <div key={titulo} className="mb-2">
-                  <div className={`font-bold ${color}`}>{titulo}</div>
-                  {lista.map(r => (
-                    <div key={r.id} className="flex justify-between text-muted pl-2">
-                      <span>{fmtDate(new Date(r.fecha+'T12:00:00'))} · {r.que} · {r.medio || 's/medio'}{r.quien !== 'Julieta' ? ` · ${r.quien}` : ''}</span>
-                      <span className="tabular-nums">{$$(r.costo)}</span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-              {analisis.restan.length + analisis.mismoDia.length + analisis.otroMedio.length + analisis.sinIdentificar.length === 0 && (
-                <div className="text-muted-light">No hay gastos de Julieta cargados desde esa fecha en Zapia.</div>
-              )}
-            </div>
-          </details>
-        )}
-
         <div className="px-4 py-3 border-t border-border-soft">
           <div className="text-xs text-muted mb-2 font-semibold">💳 Saldo real de Uala que declara Julieta (cualquier día)</div>
           {saldoActual > 0 && !saldoJuliInput && (
@@ -237,6 +220,39 @@ export default function Control({ appData, saveData, zapiaData, onRefresh, mesKe
           <div className="text-[11px] text-muted-light mt-1.5">Puede cargarlo cualquier día. Sobre ese saldo se descuentan sus gastos por transferencia; lo que no cierre en la próxima carga es gasto hormiga.</div>
         </div>
       </div>
+
+      {todasLasCargas.length > 0 && (
+        <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
+          <div className="bg-julieta text-white px-4 py-2.5 font-bold text-[13px] flex justify-between">
+            <span>🗂️ Saldos declarados por Julieta</span><span className="text-[11px] opacity-80 font-normal">{todasLasCargas.length} cargas</span>
+          </div>
+          {todasLasCargas.map((f, i) => (
+            <div key={f} className={`px-4 py-2.5 ${i<todasLasCargas.length-1?'border-b border-border-soft':''}`}>
+              {edit && edit.fecha === f ? (
+                <div>
+                  <div className="flex gap-2 mb-2">
+                    <input type="date" value={edit.nuevaFecha} max={hoy()} onChange={e=>setEdit({ ...edit, nuevaFecha:e.target.value })}
+                      className="flex-1 px-2 py-1.5 rounded-lg border-[1.5px] border-border text-sm outline-none bg-white"/>
+                    <input type="number" inputMode="numeric" min="0" value={edit.monto} onChange={e=>setEdit({ ...edit, monto:e.target.value })}
+                      className="flex-1 px-2 py-1.5 rounded-lg border-[1.5px] border-julieta text-sm outline-none text-right tabular-nums"/>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={()=>setEdit(null)} className="flex-1 py-1.5 border-[1.5px] border-border rounded-lg bg-white text-muted font-semibold text-xs touch-manipulation">Cancelar</button>
+                    <button onClick={guardarEdicion} className="flex-[2] py-1.5 border-none rounded-lg bg-julieta text-white font-bold text-xs touch-manipulation">Guardar cambios</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 text-[13px] font-semibold text-ink">{fdl(f)}</span>
+                  <span className="text-[14px] font-extrabold text-ink tabular-nums">{$$(saldoJulieta[f])}</span>
+                  <button onClick={()=>setEdit({ fecha:f, nuevaFecha:f, monto:String(saldoJulieta[f]) })} className="border-none bg-border-soft rounded-md cursor-pointer text-[12px] px-2 py-1 touch-manipulation">✏️</button>
+                  <button onClick={()=>borrarCarga(f)} className="border-none bg-border-soft rounded-md cursor-pointer text-[12px] px-2 py-1 touch-manipulation">🗑️</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {periodos.length > 0 && (
         <div className="bg-white rounded-2xl overflow-hidden shadow-sm">

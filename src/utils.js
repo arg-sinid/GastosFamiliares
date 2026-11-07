@@ -39,6 +39,14 @@ export const esUltimoDiaMes = (fechaStr) => {
   return next.getMonth() !== d.getMonth();
 };
 
+// Último día hábil (lunes a viernes) del mes: cuando cobra Julieta. No considera feriados.
+export const ultimoDiaHabil = (mesKey) => {
+  const [y, m] = mesKey.split('-').map(Number);
+  const d = new Date(y, m, 0);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+  return dateStr(d);
+};
+
 // Meses (YYYY-MM) hacia atrás desde mesKey, incluyendo mesKey, en orden cronológico.
 export const mesesAtras = (mesKey, cantidad) => {
   const [y,m] = mesKey.split('-').map(Number);
@@ -49,7 +57,7 @@ export const mesesAtras = (mesKey, cantidad) => {
 export const EMPTY_DATA = () => ({
   monthly:{}, categories:{}, uberDiDi:[], gastosRecurrentes:{},
   saldoJulieta:{}, dolarTarjeta:{}, ahorroMovimientos:[], autoDetalle:{},
-  vencimientos:{}, vehiculos:[], gastoVehiculo:{}, pagosFijos:{}, ajustes:{},
+  vencimientos:{}, vehiculos:[], gastoVehiculo:{}, pagosFijos:{}, ajustes:{}, detalleFijos:{},
 });
 export const normalizarAppData = (d) => {
   const e = EMPTY_DATA(), x = d || {};
@@ -59,7 +67,7 @@ export const normalizarAppData = (d) => {
     dolarTarjeta: x.dolarTarjeta||e.dolarTarjeta, ahorroMovimientos: x.ahorroMovimientos||e.ahorroMovimientos,
     autoDetalle: x.autoDetalle||e.autoDetalle,
     vencimientos: x.vencimientos||e.vencimientos, vehiculos: x.vehiculos||e.vehiculos, gastoVehiculo: x.gastoVehiculo||e.gastoVehiculo,
-    pagosFijos: x.pagosFijos||e.pagosFijos, ajustes: x.ajustes||e.ajustes,
+    pagosFijos: x.pagosFijos||e.pagosFijos, ajustes: x.ajustes||e.ajustes, detalleFijos: x.detalleFijos||e.detalleFijos,
   };
 };
 
@@ -97,18 +105,6 @@ export const gastosZapiaDe = (zapiaData, quien, desde, hasta, medio = null) =>
   (zapiaData||[]).filter(r => r.fecha && r.fecha > desde && r.fecha <= hasta && r.quien === quien &&
                               (!medio || (medio === 'transferencia' ? esTransferencia(r.medio) : r.medio === medio)))
                  .reduce((s,r) => s + n(r.costo), 0);
-
-// Para ver por qué un gasto de Julieta resta o no resta del saldo de la Uala a partir de una carga.
-export const analizarGastosJulieta = (zapiaData, desde, hasta) => {
-  const out = { restan:[], mismoDia:[], otroMedio:[], sinIdentificar:[] };
-  (zapiaData||[]).filter(r => r.fecha && r.fecha >= desde && r.fecha <= hasta).forEach(r => {
-    if (r.quien !== 'Julieta') { if (r.quien !== 'Germán') out.sinIdentificar.push(r); return; }
-    if (r.fecha === desde) out.mismoDia.push(r);                  // ya estaba reflejado en el saldo declarado
-    else if (esTransferencia(r.medio)) out.restan.push(r);
-    else out.otroMedio.push(r);
-  });
-  return out;
-};
 
 export const conciliarUala = ({ saldoIni, saldoReal, aportes, gastos }) => {
   const esperado = saldoIni + aportes - gastos;
@@ -263,17 +259,23 @@ export const brutoUberDiDiMes = (uberDiDi, mesKey) =>
 export const GASTOS_FIJOS_KEYS = ['icbc','bna','prestamos','nicolas','segundo','alquiler'];
 const EMPTY_GASTOS = () => Object.fromEntries(GASTOS_FIJOS_KEYS.map(k => [k,'']));
 
-// Mes tal como lo ve la familia: el total de tarjeta calculado de los resúmenes
-// pisa lo manual; lo vacío toma el valor recurrente.
-export const resolverMes = (monthly, recurrentes, totalesTarjetas, key) => {
+// Claves de los gastos fijos: los de siempre + los que se agregan a mano (ajustes.fijosExtra).
+export const clavesFijos = (ajustes) => [...GASTOS_FIJOS_KEYS, ...(((ajustes && ajustes.fijosExtra) || []).map(f => f.id))];
+
+// Mes tal como lo ve la familia: el total de tarjeta calculado de los resúmenes pisa lo manual; lo vacío toma
+// el valor recurrente. El sueldo de Julieta vacío toma el sueldo recurrente (ajustes.sueldoJulieta), así se puede
+// adelantar la carga porque cobra siempre lo mismo.
+export const resolverMes = (monthly, recurrentes, totalesTarjetas, key, ajustes = null) => {
   const s = monthly?.[key] || {};
   const tMes = totalesTarjetas?.[key] || {};
   const gastos = {};
-  Object.keys(EMPTY_GASTOS()).forEach(k => {
+  clavesFijos(ajustes).forEach(k => {
     if ((k === 'icbc' || k === 'bna') && tMes[k] !== undefined) { gastos[k] = String(Math.round(tMes[k])); return; }
     gastos[k] = s.gastos?.[k] || (recurrentes?.[k] ? String(recurrentes[k]) : '');
   });
-  return { ingresos:{ julieta:'', ...(s.ingresos||{}) }, gastos, deuda_anterior: s.deuda_anterior || 0 };
+  const ingresos = { julieta:'', ...(s.ingresos||{}) };
+  if (!ingresos.julieta && ajustes && n(ajustes.sueldoJulieta) > 0) ingresos.julieta = String(ajustes.sueldoJulieta);
+  return { ingresos, gastos, deuda_anterior: s.deuda_anterior || 0 };
 };
 
 // Resultado mensual = ingresos (sueldo de Julieta + saldo de la Uala declarado) − gastos fijos
@@ -287,7 +289,7 @@ export const calcularTotalesMes = (mes, germanIncome) => {
 };
 
 export const calcularResultadoMensual = (ctx, key) => {
-  const mes = resolverMes(ctx.monthly, ctx.gastosRecurrentes, ctx.totalesTarjetas, key);
+  const mes = resolverMes(ctx.monthly, ctx.gastosRecurrentes, ctx.totalesTarjetas, key, ctx.ajustes);
   const germanIncome = calcularIngresoGerman(ctx.saldoJulieta, key);
   return { mes, ...calcularTotalesMes(mes, germanIncome) };
 };
@@ -313,9 +315,9 @@ export const calcularFilasControl = (ctx, ahora = '') =>
 
 // Fijos del Principal SIN icbc/bna (en Cierre económico las tarjetas ya están
 // contadas dentro de los gastos por categoría).
-export const calcularGastosFijosSinTarjetas = (monthly, gastosRecurrentes, mesKey) => {
-  const g = resolverMes(monthly, gastosRecurrentes, {}, mesKey).gastos;
-  return GASTOS_FIJOS_KEYS.filter(k => k !== 'icbc' && k !== 'bna').reduce((s,k) => s + n(g[k]), 0);
+export const calcularGastosFijosSinTarjetas = (monthly, gastosRecurrentes, mesKey, ajustes = null) => {
+  const g = resolverMes(monthly, gastosRecurrentes, {}, mesKey, ajustes).gastos;
+  return clavesFijos(ajustes).filter(k => k !== 'icbc' && k !== 'bna').reduce((s,k) => s + n(g[k]), 0);
 };
 
 // ── Vencimientos de gastos fijos ────────────────────────────────────
@@ -332,9 +334,9 @@ export const fechaVencimiento = (mesKey, dia, mesSiguiente) => {
 };
 // Cuánto hay que reunir para cada vencimiento que todavía no pasó, acumulado, contra lo disponible.
 // "Disponible" lo define quien llama (en Principal: sueldo de Julieta + saldo de la Uala de Germán).
-export const calcularVencimientos = ({ vencimientos, gastos, mesKey, hoyStr, disponible }) => {
+export const calcularVencimientos = ({ vencimientos, gastos, mesKey, hoyStr, disponible, claves = null }) => {
   const porFecha = {};
-  GASTOS_FIJOS_KEYS.forEach(key => {
+  (claves || GASTOS_FIJOS_KEYS).forEach(key => {
     const v = vencimientos?.[key], monto = n(gastos?.[key]);
     if (!v || !n(v.dia) || monto <= 0) return;
     const fecha = fechaVencimiento(mesKey, v.dia, !!v.mesSiguiente);
@@ -374,10 +376,10 @@ export const ventanaVencimiento = (fechaVenc) => `${mesDesplazado(fechaVenc.slic
 // Todos los pagos programados de los meses dados (cada uno con su fecha real de vencimiento, sin importar de
 // qué mes de Principal vienen). Estado: pagado = marcado a mano (fecha de pago = cuando se marcó) o ya pasó
 // la fecha (se da por pagado el día después). visible = pendiente y dentro de la ventana de aparición.
-export const listarVencimientos = ({ vencimientos, gastosDe, meses, pagosFijos, hoyStr }) => {
+export const listarVencimientos = ({ vencimientos, gastosDe, meses, pagosFijos, hoyStr, claves = null }) => {
   const out = [];
   meses.forEach(K => {
-    calcularVencimientos({ vencimientos, gastos: gastosDe(K), mesKey: K, hoyStr, disponible: 0 }).todos.forEach(g => g.items.forEach(it => {
+    calcularVencimientos({ vencimientos, gastos: gastosDe(K), mesKey: K, hoyStr, disponible: 0, claves }).todos.forEach(g => g.items.forEach(it => {
       const id = `${K}|${it.key}`, marca = pagosFijos?.[id];
       const pagado = !!marca || g.fecha < hoyStr;
       out.push({ id, mesKey: K, key: it.key, monto: it.monto, fecha: g.fecha, pagado, manual: !!marca,
@@ -387,36 +389,76 @@ export const listarVencimientos = ({ vencimientos, gastosDe, meses, pagosFijos, 
   return out.sort((a,b) => a.fecha.localeCompare(b.fecha) || a.key.localeCompare(b.key));
 };
 
-// Pendientes visibles agrupados por fecha (los más cercanos primero), con lo acumulado contra lo disponible.
-export const agruparPendientes = (items, disponible) => {
-  const por = {};
-  items.filter(i => i.visible).forEach(i => { (por[i.fecha] = por[i.fecha] || []).push(i); });
-  let acumulado = 0;
-  return Object.keys(por).sort().map(fecha => {
-    const total = por[fecha].reduce((x,i) => x + i.monto, 0);
-    acumulado += total;
-    return { fecha, items: por[fecha], total, acumulado, balance: disponible - acumulado };
-  });
-};
-
-// Saldo "vivo" de la Uala. El saldo que declara Julieta es real a esa fecha. Desde entonces se va usando para
-// pagar los vencimientos: cada pago sale primero del sueldo de Julieta del MES EN QUE SE PAGA y lo que falte,
-// de la Uala (puede quedar negativa hasta que Julieta declare de nuevo). Los pagos anteriores a la declaración
-// ya están reflejados en el saldo declarado (solo consumieron sueldo). También bajan el saldo los gastos que
-// Julieta carga en Zapia por transferencia después de la declaración (gastosUala).
-export const estadoUala = ({ saldoDeclarado, fechaDeclaracion, mesKey, pagos, sueldoPorMes, gastosUala = 0 }) => {
+// ── Caja: cuánta plata hay y cuánta falta para llegar a pagar los vencimientos ──────────────
+// Fuentes de dinero:
+//  · la Uala de Germán: el saldo que declara Julieta (real a esa fecha) menos los gastos de Zapia de Julieta por
+//    transferencia posteriores a la declaración;
+//  · el sueldo de Julieta de cada mes, que se cobra el último día hábil y recién desde ese día sirve para pagar.
+// Cada pago (hecho o pendiente) se toma primero del sueldo ya cobrado (el más viejo primero) y lo que falte sale
+// de la Uala, que puede quedar negativa. Los pagos hechos antes de la declaración ya están reflejados en el saldo
+// declarado: solo consumieron sueldo.
+//   pagados:    [{fecha, monto}]      pagos ya hechos (marcados o con fecha vencida)
+//   pendientes: [{id, fecha, monto,…}] lo que falta pagar, en cualquier orden
+//   sueldos:    [{mes, fechaCobro, monto}]
+export const simularCaja = ({ pagados, pendientes, sueldos, saldoDeclarado, fechaDeclaracion, mesKey, gastosUala = 0, hoyStr }) => {
   const S = saldoDeclarado == null ? 0 : n(saldoDeclarado);
   const D = fechaDeclaracion || '';
   const desde = `${mesKey}-01`;
-  const pool = {};
-  Object.entries(sueldoPorMes||{}).forEach(([k,v]) => { pool[k] = Math.max(0, n(v)); });
-  let deUala = 0, pagadoDespues = 0;
-  [...(pagos||[])].sort((a,b) => a.fecha.localeCompare(b.fecha)).forEach(p => {
-    const P = p.fecha.slice(0,7), J = pool[P] || 0, deJ = Math.min(J, p.monto);
-    pool[P] = J - deJ;
-    if (D ? p.fecha > D : p.fecha >= desde) { deUala += p.monto - deJ; pagadoDespues += p.monto; }
+  const pools = (sueldos||[]).map(x => ({ ...x, restante: Math.max(0, n(x.monto)) })).sort((a,b) => a.fechaCobro.localeCompare(b.fechaCobro));
+  const tomar = (fecha, monto) => {
+    let resto = monto, deSueldo = 0;
+    pools.forEach(pl => {
+      if (resto > 0 && pl.restante > 0 && pl.fechaCobro <= fecha) { const t = Math.min(pl.restante, resto); pl.restante -= t; resto -= t; deSueldo += t; }
+    });
+    return { deSueldo, deUala: resto };
+  };
+  const poolsHasta = fecha => pools.filter(pl => pl.fechaCobro <= fecha).reduce((x,pl) => x + pl.restante, 0);
+  const porFecha = (a,b) => a.fecha.localeCompare(b.fecha) || String(a.key||'').localeCompare(String(b.key||''));
+
+  let uala = S - n(gastosUala), pagadoDespues = 0;
+  [...(pagados||[])].sort(porFecha).forEach(p => {
+    const r = tomar(p.fecha, p.monto);
+    if (D ? p.fecha > D : p.fecha >= desde) { uala -= r.deUala; pagadoDespues += p.monto; }
   });
-  const ualaHoy = S - deUala - n(gastosUala);
-  const sueldoRestante = pool[mesKey] || 0;
-  return { ualaHoy, sueldoRestante, disponibleHoy: sueldoRestante + ualaHoy, pagadoDespues, deUala, gastosUala: n(gastosUala) };
+  const ualaHoy = uala, sueldoCobrado = poolsHasta(hoyStr);
+
+  const filas = [...(pendientes||[])].sort(porFecha).map(it => {
+    const r = tomar(it.fecha, it.monto);
+    uala -= r.deUala;
+    return { ...it, deSueldo: r.deSueldo, deUala: r.deUala, balance: uala + poolsHasta(it.fecha) };
+  });
+  // Agrupado por fecha: lo acumulado a pagar y cómo queda la plata después de cada fecha.
+  const grupos = []; let acumulado = 0;
+  filas.forEach(f => {
+    let g = grupos[grupos.length-1];
+    if (!g || g.fecha !== f.fecha) { g = { fecha: f.fecha, items: [], total: 0 }; grupos.push(g); }
+    g.items.push(f); g.total += f.monto; acumulado += f.monto; g.acumulado = acumulado; g.balance = f.balance;
+  });
+  const minBalance = filas.length ? Math.min(...filas.map(f => f.balance)) : 0;
+  const primeraFalta = filas.find(f => f.balance < 0) || null;
+  const proximoCobro = pools.find(pl => pl.fechaCobro > hoyStr && pl.monto > 0) || null;
+  return {
+    ualaHoy, sueldoCobrado, disponibleHoy: ualaHoy + sueldoCobrado, pagadoDespues, gastosUala: n(gastosUala),
+    filas, grupos, totalPendiente: acumulado, alcanza: minBalance >= 0, falta: Math.max(0, -minBalance),
+    sobra: filas.length ? filas[filas.length-1].balance : ualaHoy + sueldoCobrado, primeraFalta, proximoCobro,
+  };
+};
+
+// Tablas legibles que la app deja en Google Sheets (derivadas: se reescriben en cada guardado; editarlas allá
+// no cambia la app).
+export const calcularHojasExtra = (data, zapiaData) => {
+  const f = x => x || '';
+  const ganancias = [...(data.uberDiDi||[])].sort((a,b) => String(b.fecha).localeCompare(String(a.fecha)))
+    .map(r => [r.fecha, n(r.uber), n(r.didi), n(r.total), n(r.transferencia), n(r.efectivoEnMano), n(r.efectivoCierreMes)]);
+  const saldos = Object.keys(data.saldoJulieta||{}).sort().reverse().map(k => [k, n(data.saldoJulieta[k])]);
+  const conc = calcularConciliaciones(data.saldoJulieta, data.uberDiDi, zapiaData).reverse()
+    .map(p => [p.fechaFin, p.saldoIni, p.gastosJulieta, p.transferido, p.deposito, p.esperado, p.saldoReal, p.diferencia]);
+  const ahorros = [...(data.ahorroMovimientos||[])].sort((a,b) => String(b.fecha).localeCompare(String(a.fecha)))
+    .map(m => [f(m.fecha), m.tipo === 'retiro' ? 'Retiro' : m.tipo === 'ajuste_inicial' ? 'Ajuste inicial' : 'Ingreso extra', m.tipo === 'retiro' ? -n(m.monto) : n(m.monto), f(m.descripcion)]);
+  return {
+    'Ganancias Auto': { headers:['Fecha','Uber','DiDi','Total bruto','Transferido a Uala','Efectivo que queda','Depósito cierre de mes'], rows: ganancias },
+    'Saldos Uala': { headers:['Fecha','Saldo real declarado'], rows: saldos },
+    'Conciliaciones': { headers:['Cierre','Saldo anterior','Gastos por transferencia (Zapia)','Transferencias de Germán','Depósito fin de mes','Saldo esperado','Saldo real','Diferencia (negativa = gasto hormiga)'], rows: conc },
+    'Ahorros': { headers:['Fecha','Tipo','Monto','Descripción'], rows: ahorros },
+  };
 };

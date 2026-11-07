@@ -32,7 +32,7 @@ export default function CierreReal({ appData, zapiaData, tarjetasData, onRefresh
   const brutoGanancias = brutoUberDiDiMes(uberDiDi, selKey);
   const sueldoJulieta  = n(monthly[selKey]?.ingresos?.julieta);
   const ingresos       = brutoGanancias + sueldoJulieta;
-  const fijos = calcularGastosFijosSinTarjetas(monthly, gastosRecurrentes, selKey);
+  const fijos = calcularGastosFijosSinTarjetas(monthly, gastosRecurrentes, selKey, appData.ajustes);
   const { grupos, total: totalGastos } = agruparGastosPorCategoria(zapiaData, tarjetasData, categories, dolarTarjetaMap, selKey);
   const sortedGrupos = Object.entries(grupos).sort((a,b) => b[1].total - a[1].total);
   const resultado = ingresos - totalGastos - fijos;

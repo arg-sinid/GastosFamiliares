@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────
-//  CONTROL DE GASTOS FAMILIAR — Apps Script v6
+//  CONTROL DE GASTOS FAMILIAR — Apps Script v6.1
 //  Base: apps_script_v5_corregido.js (LockService + escritura en bloque).
 //
 //  Cambios respecto de v5_corregido:
@@ -12,6 +12,8 @@
 //     calculadas con las mismas funciones que muestra la pantalla; acá solo se escriben.
 //   · Rechaza guardados vacíos que borrarían datos existentes, y payloads de
 //     versiones viejas de la app (sin baseVersion).
+//   · Hojas legibles derivadas (v6.1): además de "Control 2026", la app deja "Ganancias Auto", "Saldos Uala",
+//     "Conciliaciones" y "Ahorros" ya calculadas. Son de solo salida: se reescriben en cada guardado.
 //   · Registro Diario: cada fila devuelve un id estable (hash) para vincular
 //     el detalle de Auto sin duplicar el gasto.
 //  Hoja "Tarjetas": encabezados id_unico | mes | tarjeta | fecha | comercio |
@@ -36,7 +38,7 @@ const HEADERS_CONTROL = [
 
 const emptyData = () => ({ monthly:{}, categories:{}, uberDiDi:[], gastosRecurrentes:{},
   saldoJulieta:{}, dolarTarjeta:{}, ahorroMovimientos:[], autoDetalle:{},
-  vencimientos:{}, vehiculos:[], gastoVehiculo:{}, pagosFijos:{}, ajustes:{} });
+  vencimientos:{}, vehiculos:[], gastoVehiculo:{}, pagosFijos:{}, ajustes:{}, detalleFijos:{} });
 
 function json(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
@@ -229,7 +231,10 @@ function doPost(e) {
     let controlOk = true;
     try { escribirControl(payload.filasControl); } catch (err) { controlOk = false; }
 
-    return json({ status:"ok", version, controlOk, backup });
+    let hojasOk = true;
+    try { escribirHojasExtra(payload.hojasExtra); } catch (err) { hojasOk = false; }
+
+    return json({ status:"ok", version, controlOk, hojasOk, backup });
   } catch (err) {
     return json({ status:"error", msg:err.toString() });
   } finally {
@@ -267,6 +272,28 @@ function escribirControl(filas) {
   sheet.getRange(1, 5, 1, 7).setBackground("#C53030");
   sheet.getRange(1, 12, 1, 3).setBackground("#744210");
   sheet.getRange(1, 14, 1, 2).setBackground("#2B6CB0");
+}
+
+// Hojas legibles derivadas. Solo se escriben las de esta lista; cada una se reescribe completa.
+const HOJAS_DERIVADAS = ["Ganancias Auto", "Saldos Uala", "Conciliaciones", "Ahorros"];
+function escribirHojasExtra(hojas) {
+  if (!hojas || typeof hojas !== "object") return;
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  HOJAS_DERIVADAS.forEach(nombre => {
+    const h = hojas[nombre];
+    if (!h || !Array.isArray(h.headers) || !Array.isArray(h.rows) || h.headers.length === 0) return;
+    const cols = h.headers.length;
+    const rows = h.rows.filter(r => Array.isArray(r) && r.length === cols).slice(0, 5000);
+    let sh = ss.getSheetByName(nombre);
+    if (!sh) sh = ss.insertSheet(nombre);
+    const ultima = sh.getLastRow();
+    if (ultima > 0) sh.getRange(1, 1, ultima, cols).clearContent();
+    const enc = sh.getRange(1, 1, 1, cols);
+    enc.setValues([h.headers]);
+    enc.setFontWeight("bold").setBackground("#1A365D").setFontColor("#FFFFFF").setWrap(true);
+    sh.setFrozenRows(1);
+    if (rows.length) sh.getRange(2, 1, rows.length, cols).setValues(rows);
+  });
 }
 
 // ── Mantenimiento manual (se ejecutan desde el editor de Apps Script) ─

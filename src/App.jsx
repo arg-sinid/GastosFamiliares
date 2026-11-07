@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { storage } from './storage.js';
 import {
-  calcularTotalesTarjetas, desfaseTarjetas, calcularFilasControl, dedupePorId, EMPTY_DATA, setOcultarMontos, hoy,
+  calcularTotalesTarjetas, desfaseTarjetas, calcularFilasControl, calcularHojasExtra, dedupePorId, EMPTY_DATA, setOcultarMontos, hoy,
 } from './utils.js';
 import { SyncEngine } from './sync.js';
 import { SkeletonHero, SkeletonRow } from './components/ui.jsx';
@@ -85,6 +85,7 @@ export default function App() {
   const [syncStatus,   setSyncStatus]   = useState('idle');
   const [syncMsg,      setSyncMsg]      = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [navGastos,    setNavGastos]    = useState(null);     // { tarjeta, mes, n } para abrir una tarjeta desde Principal
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // Todos los importes de la app respetan este interruptor (ver utils.$$).
@@ -115,8 +116,11 @@ export default function App() {
       buildExtra: (data) => {
         const totalesTarjetas = calcularTotalesTarjetas(tarjetasRef.current, data.dolarTarjeta, desfaseTarjetas(data.ajustes));
         const ctx = { monthly:data.monthly, gastosRecurrentes:data.gastosRecurrentes, totalesTarjetas,
-          uberDiDi:data.uberDiDi, zapiaData:zapiaRef.current, saldoJulieta:data.saldoJulieta, hoyStr:hoy() };
-        return { filasControl: calcularFilasControl(ctx, new Date().toLocaleString('es-AR')) };
+          uberDiDi:data.uberDiDi, zapiaData:zapiaRef.current, saldoJulieta:data.saldoJulieta, hoyStr:hoy(), ajustes:data.ajustes };
+        return {
+          filasControl: calcularFilasControl(ctx, new Date().toLocaleString('es-AR')),
+          hojasExtra: calcularHojasExtra(data, zapiaRef.current),      // tablas legibles: Ganancias Auto, Saldos Uala, Conciliaciones, Ahorros
+        };
       },
       onStatus: (s, msg) => {
         setSyncing(s === 'syncing');
@@ -203,6 +207,7 @@ export default function App() {
   }, []);
 
   const retry = () => engine.flush();
+  const irATarjeta = (tarjeta, mes) => { setNavGastos({ tarjeta, mes, n: Date.now() }); setActiveApp('gastos'); };
 
   const saveSettings = (url, usr, meta) => {
     setUsuario(usr); setMetaAhorro(meta);
@@ -268,10 +273,10 @@ export default function App() {
 
       <div className={activeApp==='principal'?'block':'hidden'}>
         <ControlGastos {...commonProps} metaAhorro={metaAhorro} syncMsg={syncMsg}
-          onRetry={retry} onOpenSettings={()=>setShowSettings(true)}/>
+          onRetry={retry} onOpenSettings={()=>setShowSettings(true)} onIrATarjeta={irATarjeta}/>
       </div>
       <div className={activeApp==='gastos'?'block':'hidden'}>
-        <Gastos {...commonProps} loadingTarjetas={tarjetasLoading} onRefreshTarjetas={reloadTarjetas}/>
+        <Gastos {...commonProps} loadingTarjetas={tarjetasLoading} onRefreshTarjetas={reloadTarjetas} nav={navGastos}/>
       </div>
       <div className={activeApp==='auto'?'block':'hidden'}><Auto {...commonProps}/></div>
 

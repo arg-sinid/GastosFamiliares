@@ -99,3 +99,27 @@ Sacá captura de Principal (Historial) de los últimos meses ANTES de actualizar
 - Afecta: total de ICBC/BNA en Principal, vencimientos (monto de la tarjeta), resultado mensual, historial y la hoja Control. NO cambia: Gastos (sigue por mes del resumen/gasto), Cierre económico y el historial de tarjetas.
 - Se guarda como `ajustes.tarjetaDesfase` (0 o 1) y se sincroniza entre celulares.
 - Atención: el Principal de octubre pasa a mostrar el resumen de septiembre. Si preferís el criterio anterior, elegí "el mismo mes".
+
+## v6.0 — Principal pensado como caja
+**Idea:** lo más importante es saber cuánta plata falta juntar para llegar a pagar los vencimientos, y cuándo.
+
+**Principal → Mes**
+- **Tarjeta "Vencimientos"** (arriba, desde el 25 del mes anterior a cada fecha y hasta que se pagan): "Falta juntar $X" o "Alcanza, sobran $X"; en qué fecha y con qué pago se queda corto; saldo de la Uala hoy; sueldo ya cobrado sin usar; y la lista por fecha, los más cercanos primero, con "✓ Pagado" y lo que queda después de cada fecha.
+- **Sueldo de Julieta con fecha de cobro:** se cobra el último día hábil del mes (lunes a viernes; no considera feriados) y recién desde ese día sirve para pagar. El sueldo de noviembre no ayuda a pagar el alquiler del 10/11: ayuda desde el 30/11. Cada pago sale primero del sueldo ya cobrado (el más viejo primero) y lo que falte, de la Uala (puede quedar negativa).
+- **Sueldo recurrente (🔁):** como cobra siempre lo mismo, se puede adelantar la carga: los meses sin importe propio toman el sueldo recurrente.
+- **Ingresos familiares:** sueldo de Julieta y saldo de la Uala hoy (declarado − pagos − gastos de Julieta por transferencia).
+- **Gastos fijos:** tocar el nombre abre el detalle. Tarjeta ICBC/BNA lleva a Gastos → Tarjetas, al resumen que corresponde. Los otros (Nicolás, Segundo, Préstamos, Alquiler…) abren un detalle donde se cargan conceptos con importe y categoría, con "usar la suma como importe del fijo" y "copiar el mes anterior". **➕ Agregar gasto fijo** crea uno nuevo (con su 📅 y 🔁); se puede quitar con la ×.
+- **Editor de vencimiento:** "del mismo mes / del mes siguiente" con la fecha resultante para el mes que se mira ("Para Noviembre vence el 10/11/2026"). Para que el alquiler del 10/11 aparezca, el alquiler tiene que estar en "del mismo mes".
+- El resultado mensual quedó en una línea al pie (sueldo + saldo de la Uala − fijos).
+
+**Control**
+- Nueva lista **Saldos declarados por Julieta** con todas las cargas: se pueden editar (fecha e importe) y borrar.
+- Se eliminó "Qué gastos de Julieta restan desde la carga…".
+
+**Google Sheets (backend v6.1, opcional pero recomendado)**
+- Además de "Control 2026" (un renglón por mes), la app deja tablas legibles que se reescriben en cada guardado: **Ganancias Auto**, **Saldos Uala**, **Conciliaciones** y **Ahorros**. Son solo de salida: editarlas en la planilla no cambia la app (para editar, usar la app).
+- El estado completo sigue en la hoja oculta `_app_data_` (JSON) y en los backups `_backup_*`.
+
+**Datos nuevos (arrancan vacíos):** `ajustes.fijosExtra`, `ajustes.sueldoJulieta`, `detalleFijos`.
+
+**Pendiente:** los "últimos movimientos" de tarjeta que se van a cargar por Zapia para ver los gastos que se van generando: falta definir en qué hoja y columna los carga Zapia.

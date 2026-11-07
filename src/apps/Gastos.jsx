@@ -195,7 +195,7 @@ function HistorialTarjetas({ tarjetasData, dolarMap }) {
   );
 }
 
-export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onRefresh, onRefreshTarjetas, loadingTarjetas }) {
+export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onRefresh, onRefreshTarjetas, loadingTarjetas, nav }) {
   const today = new Date();
   const [tab,       setTab]       = useState('detalle');
   const [filtro,    setFiltro]    = useState('mes');
@@ -213,6 +213,12 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
   const [selTarjeta, setSelTarjeta] = useState(null);
   const [dolarInput, setDolarInput] = useState('');
   const [reparando, setReparando] = useState(false);
+
+  // Abrir una tarjeta desde Principal: va a Tarjetas, al mes del resumen y al detalle de esa tarjeta.
+  useEffect(() => {
+    if (!nav) return;
+    setTab('tarjetas'); setSelMes(nav.mes); setSelTarjeta(String(nav.tarjeta).toUpperCase());
+  }, [nav?.n]);
 
   const categories = appData.categories || {};
   const vehiculos  = appData.vehiculos || [];
@@ -246,8 +252,9 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
 
   // Fijos del Principal: solo lectura acá (se editan en Principal).
   const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, dolarMap, desfaseTarjetas(appData.ajustes));
-  const fijos = resolverMes(appData.monthly || {}, appData.gastosRecurrentes || {}, totalesTarjetas, selMes).gastos;
-  const FIJOS = [['prestamos','🏦 Préstamos'],['nicolas','👤 Nicolás'],['segundo','👤 Segundo'],['alquiler','🏠 Alquiler']].filter(([k]) => n(fijos[k]) > 0);
+  const fijos = resolverMes(appData.monthly || {}, appData.gastosRecurrentes || {}, totalesTarjetas, selMes, appData.ajustes).gastos;
+  const FIJOS = [['prestamos','🏦 Préstamos'],['nicolas','👤 Nicolás'],['segundo','👤 Segundo'],['alquiler','🏠 Alquiler'],
+    ...((appData.ajustes?.fijosExtra) || []).map(e => [e.id, `${e.icon || '📌'} ${e.label}`])].filter(([k]) => n(fijos[k]) > 0);
 
   const pedirCategoria = (keys, label, ids = []) => { setEditKeys(keys); setEditLabel(label); setEditIds(ids); };
 
