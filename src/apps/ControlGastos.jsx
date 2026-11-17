@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
+import { n, $$, fmtK, getKey, fmtKey, monthOpts, hoy, uid, fmtDate, mesDesplazado } from '../utils.js';
 import {
-  n, $$, fmtK, getKey, fmtKey, monthOpts, hoy, uid, fmtDate, VENCIMIENTO_MES_SIGUIENTE_DEFECTO, desfaseTarjetas, mesDesplazado,
-  calcularTotalesTarjetas, ultimoSaldoDelMes, simularCaja, gastosZapiaDe, calcularAhorroManual, listarVencimientos,
-  fechaVencimiento, ultimoDiaHabil, clavesFijos,
-  calcularResultadoMensual, calcularTotalesMes, resolverMes,
-} from '../utils.js';
+  VENCIMIENTO_MES_SIGUIENTE_DEFECTO, desfaseTarjetas, fechaVencimiento, clavesFijos, esTarjetaClave, totalFijos,
+  construirSituacion, calcularResultadoMensual, calcularAhorroManual,
+} from '../motor.js';
 import { MoneyInput, CategoriaModal } from '../components/ui.jsx';
+import { ConciliacionUalaDetalle } from '../components/conciliacion.jsx';
 import Control from './Control.jsx';
 import CierreReal from './CierreReal.jsx';
 
@@ -98,87 +98,50 @@ function EditorVencimiento({ valor, defectoSiguiente, mesKey, onSave, onClear })
   );
 }
 
-// Plata para los vencimientos: qué hay hoy, qué se paga y cuándo, y cuánto falta juntar. Los más cercanos primero.
-function CajaCard({ caja, hoyStr, etiquetas, mesActual, onPagar, pagadosManual, onDeshacer }) {
-  const dias = f => Math.round((new Date(f+'T12:00:00') - new Date(hoyStr+'T12:00:00')) / 86400000);
-  const txtDias = f => { const d = dias(f); return d === 0 ? 'vence hoy' : d === 1 ? 'mañana' : `en ${d} días`; };
-  const fd = f => fmtDate(new Date(f+'T12:00:00'));
-  const neg = v => v < 0 ? `-${$$(Math.abs(v))}` : $$(v);
-  const p = caja.grupos[0], ok = caja.alcanza;
-  const nombre = it => etiquetas[it.key] || it.key;
+const ESTADOS = {
+  vencido:   { txt: 'Vencido',          cls: 'bg-negative-soft text-negative' },
+  proximo:   { txt: 'Próximo a vencer', cls: 'bg-accent-soft text-accent-strong' },
+  pendiente: { txt: 'Pendiente',        cls: 'bg-border-soft text-muted' },
+  pagado:    { txt: 'Pagado',           cls: 'bg-positive-soft text-positive' },
+};
+
+// Una obligación: gasto fijo + período + vencimiento + estado. Solo muestra lo que calculó el motor.
+function ObligacionRow({ o, etiquetas, onPagar, onDeshacer, onAbrir }) {
+  const e = ESTADOS[o.estado], provisorio = o.tipo === 'provisorio';
+  const fuente = o.fuente === 'movimientos' ? 'según movimientos provisorios' : o.fuente === 'recurrente' ? 'importe recurrente' : 'según el resumen anterior';
+  const puedePagar = !o.pagado && (!provisorio || o.estado === 'vencido');
   return (
-    <div className={`rounded-2xl overflow-hidden mb-3.5 border-2 shadow-sm ${ok?'border-[#68D391]':'border-[#FC8181]'}`}>
-      <div className="bg-ink text-white px-4 py-2.5 flex justify-between items-center">
-        <span className="font-bold text-[13px]">📅 Vencimientos</span>
-        <span className="text-[11px] opacity-80">próximo {fd(p.fecha)} · {txtDias(p.fecha)}</span>
-      </div>
-      <div className={`px-4 py-3.5 ${ok?'bg-positive-soft':'bg-negative-soft'}`}>
-        {ok ? (
-          <>
-            <div className="text-[17px] font-extrabold text-positive">✓ Alcanza para pagar todo lo que vence</div>
-            <div className="text-[13px] font-bold text-positive mt-1">Sobran {$$(caja.sobra)} después del último vencimiento</div>
-          </>
-        ) : (
-          <>
-            <div className="text-[11px] font-bold uppercase tracking-wide text-muted">Falta juntar</div>
-            <div className="text-[30px] font-extrabold tracking-tight tabular-nums text-negative">{$$(caja.falta)}</div>
-            <div className="text-[12px] font-semibold text-negative">Se queda corto el {fd(caja.primeraFalta.fecha)} al pagar {nombre(caja.primeraFalta)}</div>
-          </>
-        )}
-        <div className="grid grid-cols-2 gap-2 mt-3 text-[11px]">
-          <div className="bg-white/70 rounded-lg px-2.5 py-2">
-            <div className="text-muted">Saldo de la Uala hoy</div>
-            <div className={`text-[15px] font-extrabold tabular-nums ${caja.ualaHoy<0?'text-negative':'text-ink'}`}>{neg(caja.ualaHoy)}</div>
-          </div>
-          <div className="bg-white/70 rounded-lg px-2.5 py-2">
-            <div className="text-muted">Sueldo ya cobrado sin usar</div>
-            <div className="text-[15px] font-extrabold tabular-nums text-ink">{$$(caja.sueldoCobrado)}</div>
-          </div>
-        </div>
-        {caja.proximoCobro && (
-          <div className="text-[11px] text-muted mt-2 leading-relaxed">
-            💼 Julieta cobra {$$(caja.proximoCobro.monto)} el {fd(caja.proximoCobro.fechaCobro)} (último día hábil de {fmtKey(caja.proximoCobro.mes).split(' ')[0]}): sirve para pagar desde esa fecha, no antes.
-          </div>
-        )}
-      </div>
-      <div className="bg-white">
-        {caja.grupos.map((g, i) => (
-          <div key={g.fecha} className={`px-4 py-2.5 ${i>0?'border-t border-border-soft':''}`}>
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-[12px] font-bold text-ink">{fd(g.fecha)} <span className="text-muted-light font-normal">· {txtDias(g.fecha)}</span></span>
-              <span className="text-[12px] font-extrabold text-negative tabular-nums">{$$(g.total)}</span>
-            </div>
-            {g.items.map(it => (
-              <div key={it.id} className="flex items-center gap-2 py-1 pl-2">
-                <div className="flex-1 text-[12px] text-ink">
-                  {nombre(it)}
-                  {it.mesKey !== mesActual && <span className="text-[10px] text-muted-light"> · de {fmtKey(it.mesKey).split(' ')[0]}</span>}
-                </div>
-                <span className="text-[12px] text-muted tabular-nums">{$$(it.monto)}</span>
-                <button onClick={()=>onPagar(it)} className="border-none bg-positive-soft text-positive rounded-lg px-2 py-1 text-[11px] font-bold cursor-pointer touch-manipulation">✓ Pagado</button>
-              </div>
-            ))}
-            <div className={`flex justify-between text-[11px] mt-1 pl-2 font-semibold ${g.balance>=0?'text-positive':'text-negative'}`}>
-              <span>Acumulado {$$(g.acumulado)}</span><span>{g.balance>=0 ? `queda ${$$(g.balance)}` : `faltan ${$$(Math.abs(g.balance))}`}</span>
-            </div>
-          </div>
-        ))}
-        {pagadosManual.length > 0 && (
-          <div className="px-4 py-2 border-t border-border-soft bg-paper">
-            <div className="text-[10px] font-bold uppercase tracking-wide text-muted mb-1">Marcados como pagados</div>
-            {pagadosManual.map(it => (
-              <div key={it.id} className="flex items-center gap-2 text-[11px] text-muted">
-                <span className="flex-1">✓ {nombre(it)} · vencía {fd(it.fecha)}</span>
-                <span className="tabular-nums">{$$(it.monto)}</span>
-                <button onClick={()=>onDeshacer(it)} className="border-none bg-border-soft rounded-md px-1.5 py-0.5 text-[10px] text-muted cursor-pointer touch-manipulation">deshacer</button>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="px-4 py-2 bg-paper border-t border-border-soft text-[10px] text-muted-light leading-relaxed">
-          Cada pago sale primero del sueldo ya cobrado y después de la Uala. Aparecen desde el 25 del mes anterior a su fecha y se ocultan al pagarse. Solo cuentan los fijos con vencimiento cargado (📅).
+    <div className="flex items-center gap-2 px-4 py-2.5 border-t border-border-soft bg-white">
+      <div className="flex-1 min-w-0">
+        <button onClick={() => onAbrir(o)} className="border-none bg-transparent p-0 text-left cursor-pointer touch-manipulation">
+          <span className="text-[13px] font-semibold text-ink">{etiquetas[o.key] || o.key} ›</span>
+        </button>
+        <div className="flex gap-1.5 flex-wrap mt-0.5 items-center">
+          <span className={`text-[10px] font-bold rounded px-1.5 py-0.5 ${e.cls}`}>{e.txt}</span>
+          {provisorio && <span className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-[#FEEBC8] text-[#9C4221]">Estimado · {fuente}</span>}
+          <span className="text-[10px] text-muted-light">
+            {o.pagado ? `pagado ${fmtDate(new Date((o.fechaPago || o.fecha) + 'T12:00:00'))}` : `vence ${fmtDate(new Date(o.fecha + 'T12:00:00'))}`}
+            {o.mesResumen ? ` · resumen de ${fmtKey(o.mesResumen).split(' ')[0]}` : ` · de ${fmtKey(o.periodo).split(' ')[0]}`}
+          </span>
         </div>
       </div>
+      <span className="text-[13px] font-bold tabular-nums text-ink">{provisorio ? '≈ ' : ''}{$$(o.monto)}</span>
+      {puedePagar && <button onClick={() => onPagar(o)} className="border-none bg-positive-soft text-positive rounded-lg px-2 py-1 text-[11px] font-bold cursor-pointer touch-manipulation">✓ Pagado</button>}
+      {o.pagado && <button onClick={() => onDeshacer(o)} className="border-none bg-border-soft rounded-md px-1.5 py-0.5 text-[10px] text-muted cursor-pointer touch-manipulation">deshacer</button>}
+    </div>
+  );
+}
+
+function SeccionObligaciones({ titulo, color, lista, total, nota, ...props }) {
+  if (!lista.length) return null;
+  return (
+    <div>
+      <div className="px-4 py-2 flex justify-between items-center bg-paper border-t-2 border-border-soft">
+        <span className={`text-[11px] font-extrabold uppercase tracking-wide ${color}`}>{titulo}</span>
+        <span className={`text-[12px] font-extrabold tabular-nums ${color}`}>{$$(total)}</span>
+      </div>
+      {nota && <div className="px-4 py-1 text-[10px] text-muted-light bg-paper">{nota}</div>}
+      {lista.map(o => <ObligacionRow key={o.id} o={o} {...props}/>)}
     </div>
   );
 }
@@ -242,91 +205,84 @@ function DetalleFijoModal({ titulo, mesLabel, items, montoFijo, categorias, hayA
   );
 }
 
-export default function ControlGastos({ appData, saveData, zapiaData, tarjetasData, syncing, syncStatus, syncMsg, onRetry, onRefresh, usuario, metaAhorro, onOpenSettings, ocultar, onToggleOcultar, onIrATarjeta }) {
-  const today      = new Date();
+export default function ControlGastos({ appData, saveData, zapiaData, tarjetasData, tarjetasProv, syncing, syncStatus, syncMsg, backendInfo, onRetry, onRefresh, usuario, metaAhorro, onOpenSettings, ocultar, onToggleOcultar, onIrATarjeta }) {
+  const today = new Date();
   const currentKey = getKey(today);
+  const hoyStr = hoy();
 
-  const [selKey,   setSelKey]   = useState(currentKey);   // mes calendario actual por defecto
-  const [tab,      setTab]      = useState('mes');
-  const [saving,   setSaving]   = useState(false);
-  const [savedOk,  setSavedOk]  = useState(false);
-  const [edit,     setEdit]     = useState(null);
+  const [selKey, setSelKey] = useState(currentKey);
+  const [tab, setTab] = useState('mes');
+  const [saving, setSaving] = useState(false);
+  const [savedOk, setSavedOk] = useState(false);
+  const [edit, setEdit] = useState(null);
   const [formAhorro, setFormAhorro] = useState(null);
   const [editVenc, setEditVenc] = useState(null);
-  const [detalleFijo, setDetalleFijo] = useState(null);       // clave del fijo cuyo detalle se está viendo
-  const [nuevoFijo, setNuevoFijo] = useState(null);           // { label, icon } mientras se agrega un gasto fijo
+  const [detalleFijo, setDetalleFijo] = useState(null);
+  const [nuevoFijo, setNuevoFijo] = useState(null);
+  const [verUala, setVerUala] = useState(false);
+  const [verPagadas, setVerPagadas] = useState(false);
+  const [editarImportes, setEditarImportes] = useState(false);
 
-  const allData     = appData.monthly            || {};
-  const uberDiDi    = appData.uberDiDi           || [];
-  const recurrentes = appData.gastosRecurrentes  || {};
-  const dolarTarjetaMap   = appData.dolarTarjeta || {};
+  const allData = appData.monthly || {};
+  const recurrentes = appData.gastosRecurrentes || {};
+  const vencimientos = appData.vencimientos || {};
+  const detalleFijos = appData.detalleFijos || {};
+  const pagosFijos = appData.pagosFijos || {};
   const ahorroMovimientos = appData.ahorroMovimientos || [];
-  const saldoJulieta = appData.saldoJulieta || {};
-
-  // Los resúmenes de tarjeta se pagan después: con desfase 1, el Principal de noviembre usa el resumen de octubre.
   const ajustes = appData.ajustes || {};
   const claves = clavesFijos(ajustes);
   const desfase = desfaseTarjetas(ajustes);
   const mesResumen = mesDesplazado(selKey, -desfase);
-  const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, dolarTarjetaMap, desfase);
-  const cambiarDesfase = (v) => saveData({ ...appData, ajustes: { ...(appData.ajustes || {}), tarjetaDesfase: Number(v) } });
-  // Contexto único: TODAS las pantallas y la hoja Control calculan con esto.
-  const ctx = { monthly:allData, gastosRecurrentes:recurrentes, totalesTarjetas, uberDiDi, zapiaData, saldoJulieta, hoyStr:hoy(), ajustes };
+  const cambiarDesfase = (v) => saveData({ ...appData, ajustes: { ...ajustes, tarjetaDesfase: Number(v) } });
 
-  const agregarMovimientoAhorro = async ({ tipo, monto, descripcion }) => {
-    const nuevo = { id: uid(), fecha: hoy(), tipo, monto, descripcion };
-    await saveData({ ...appData, ahorroMovimientos: [nuevo, ...ahorroMovimientos] });
-    setFormAhorro(null);
-  };
-  const borrarMovimientoAhorro = async (id) => {
-    await saveData({ ...appData, ahorroMovimientos: ahorroMovimientos.filter(m=>m.id!==id) });
-  };
+  // ÚNICA fuente de cálculo: el motor financiero. Los importes que se están editando (sin guardar) se reflejan en todo.
+  const appCalc = edit && edit.key === selKey ? { ...appData, monthly: { ...allData, [selKey]: edit.data } } : appData;
+  const situ = construirSituacion({ appData: appCalc, zapiaData, tarjetasData, tarjetasProvisorias: tarjetasProv || [], mesKey: selKey, hoyStr });
+  const mesEdit = situ.mes, totalesTarjetas = situ.totalesTarjetas;
+  const { disponibilidad: disp, obligaciones: ob, resultado: res, cobertura } = situ;
+  const esMesActual = selKey === currentKey;
 
-  const mesData = resolverMes(allData, recurrentes, totalesTarjetas, selKey, ajustes);
-  const mesEdit = edit && edit.key === selKey ? edit.data : mesData;
-
-  const saldoDecl    = ultimoSaldoDelMes(saldoJulieta, selKey);     // tal cual lo declara Julieta
-  const germanIncome = saldoDecl ? saldoDecl.valor : 0;
-  const tot        = calcularTotalesMes(mesEdit, germanIncome);
-  const meta       = n(metaAhorro);
-  const vencimientos = appData.vencimientos || {};
-  const hoyStr = hoy();
-  // ── Caja: vencimientos y plata para pagarlos ─────────────────────
-  // Se arma con TODOS los fijos con fecha de los meses vecinos, sin importar de qué mes de Principal vienen:
-  // así aparecen primero los más cercanos (p. ej. el alquiler del 10/11 antes que el del 10/12).
-  const pagosFijos = appData.pagosFijos || {};
-  const detalleFijos = appData.detalleFijos || {};
-  const [py, pm] = selKey.split('-').map(Number);
-  const mesRel = d => getKey(new Date(py, pm - 1 + d, 1));
-  const resolver = k => resolverMes(allData, recurrentes, totalesTarjetas, k, ajustes);
-  const gastosDe = k => k === selKey ? mesEdit.gastos : resolver(k).gastos;
-  const sueldoDe = k => k === selKey ? n(mesEdit.ingresos.julieta) : n(resolver(k).ingresos.julieta);
-  const lista = listarVencimientos({ vencimientos, gastosDe, meses: [mesRel(-1), selKey, mesRel(1)], pagosFijos, hoyStr, claves });
-  // Gastos de Zapia que Julieta carga en modo transferencia después de su declaración: salen de la Uala.
-  const gastosUala = saldoDecl ? gastosZapiaDe(zapiaData, 'Julieta', saldoDecl.fecha, hoyStr, 'transferencia') : 0;
-  // El sueldo de Julieta se cobra el último día hábil: recién desde ese día sirve para pagar.
-  const sueldos = [mesRel(-1), selKey, mesRel(1)].map(k => ({ mes: k, fechaCobro: ultimoDiaHabil(k), monto: sueldoDe(k) }));
-  const caja = simularCaja({
-    saldoDeclarado: saldoDecl ? saldoDecl.valor : null, fechaDeclaracion: saldoDecl?.fecha || '', mesKey: selKey, gastosUala, hoyStr, sueldos,
-    pagados: lista.filter(i => i.pagado).map(i => ({ fecha: i.fechaPago, monto: i.monto, key: i.key })),
-    pendientes: lista.filter(i => i.visible),
-  });
-  const mostrarCaja = selKey === currentKey && caja.filas.length > 0;
-  const pagadosManual = lista.filter(i => i.manual && i.fecha >= hoyStr);
   const extras = ajustes.fijosExtra || [];
   const filasFijos = [...GASTOS_CONFIG, ...extras.map(e => ({ key: e.id, label: e.label, icon: e.icon || '📌', hint: '', extra: true }))];
   const etiquetas = Object.fromEntries(filasFijos.map(g => [g.key, g.label]));
-  const marcarPago = async (it) => { await saveData({ ...appData, pagosFijos: { ...pagosFijos, [it.id]: { fecha: hoyStr } } }); };
-  const deshacerPago = async (it) => { const nx = { ...pagosFijos }; delete nx[it.id]; await saveData({ ...appData, pagosFijos: nx }); };
+  const obligacionesMes = ob.todas.filter(o => o.visible && o.periodo === selKey);
+  const sinFecha = claves.filter(k => n(mesEdit.gastos[k]) > 0 && !(vencimientos[k] && n(vencimientos[k].dia)));
+  const neg = v => v < 0 ? `-${$$(Math.abs(v))}` : $$(v);
+
+  // ── acciones ──
+  const marcarPago = (o) => saveData({ ...appData, pagosFijos: { ...pagosFijos, [o.id]: { fecha: hoyStr } } });
+  const deshacerPago = (o) => { const nx = { ...pagosFijos }; delete nx[o.id]; return saveData({ ...appData, pagosFijos: nx }); };
+  const abrirObligacion = (o) => {
+    if (esTarjetaClave(o.key)) onIrATarjeta?.(o.key.toUpperCase(), o.mesResumen || mesResumen);
+    else { if (o.periodo !== selKey) setSelKey(o.periodo); setDetalleFijo(o.key); }
+  };
   const guardarVenc = async (key, v) => { await saveData({ ...appData, vencimientos: { ...vencimientos, [key]: v } }); setEditVenc(null); };
   const quitarVenc = async (key) => { const nx = { ...vencimientos }; delete nx[key]; await saveData({ ...appData, vencimientos: nx }); setEditVenc(null); };
 
-  // Sueldo de Julieta recurrente: como cobra siempre lo mismo, se puede adelantar la carga de los meses que vienen.
+  const agregarMovimientoAhorro = async ({ tipo, monto, descripcion }) => {
+    await saveData({ ...appData, ahorroMovimientos: [{ id: uid(), fecha: hoy(), tipo, monto, descripcion }, ...ahorroMovimientos] });
+    setFormAhorro(null);
+  };
+  const borrarMovimientoAhorro = async (id) => { await saveData({ ...appData, ahorroMovimientos: ahorroMovimientos.filter(m => m.id !== id) }); };
+
+  const updateField = (section, field, value) => {
+    const base = { ingresos: mesEdit.ingresos, gastos: mesEdit.gastos };
+    setEdit({ key: selKey, data: { ...base, [section]: { ...base[section], [field]: value } } });
+  };
+  const toggleRecurrente = async (key) => {
+    const newRec = { ...recurrentes };
+    if (recurrentes[key] !== undefined) delete newRec[key]; else newRec[key] = n(mesEdit.gastos[key]) || 0;
+    await saveData({ ...appData, gastosRecurrentes: newRec });
+  };
+  const updateRecurrente = async (key, value) => {
+    if (!recurrentes[key]) return;
+    await saveData({ ...appData, gastosRecurrentes: { ...recurrentes, [key]: n(value) } });
+  };
+  // Sueldo de Julieta recurrente: cobra siempre lo mismo, se puede adelantar la carga de los meses que vienen.
   const sueldoRecurrente = n(ajustes.sueldoJulieta) > 0;
   const toggleSueldoRecurrente = () => saveData({ ...appData, ajustes: { ...ajustes, sueldoJulieta: sueldoRecurrente ? 0 : n(mesEdit.ingresos.julieta) } });
   const updateSueldo = (v) => { updateField('ingresos', 'julieta', v); if (sueldoRecurrente) saveData({ ...appData, ajustes: { ...ajustes, sueldoJulieta: n(v) } }); };
 
-  // Gastos fijos nuevos
   const agregarFijo = async () => {
     if (!nuevoFijo || !nuevoFijo.label.trim()) return;
     const f = { id: 'f' + uid(), label: nuevoFijo.label.trim(), icon: nuevoFijo.icon || '📌' };
@@ -334,59 +290,45 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
     setNuevoFijo(null);
   };
   const quitarFijo = async (f) => {
-    if (!window.confirm(`¿Quitar el gasto fijo "${f.label}"? Deja de sumar en todos los meses (los importes cargados quedan guardados).`)) return;
+    if (!f || !window.confirm(`¿Quitar el gasto fijo "${f.label}"? Deja de sumar en todos los meses (los importes cargados quedan guardados).`)) return;
     await saveData({ ...appData, ajustes: { ...ajustes, fijosExtra: extras.filter(x => x.id !== f.id) } });
   };
-
-  // Detalle de un fijo (en qué se gasta y a qué categoría va)
   const claveDetalle = (k, key) => `${k}|${key}`;
+  const mesRel = d => mesDesplazado(selKey, d);
   const itemsDetalle = (key) => detalleFijos[claveDetalle(selKey, key)] || [];
   const guardarDetalle = (key, items) => {
     const nx = { ...detalleFijos }; if (items.length) nx[claveDetalle(selKey, key)] = items; else delete nx[claveDetalle(selKey, key)];
     return saveData({ ...appData, detalleFijos: nx });
   };
 
-  const updateField = (section, field, value) => {
-    setEdit({ key: selKey, data: { ...mesEdit, [section]: { ...mesEdit[section], [field]: value } } });
-  };
-
-  const toggleRecurrente = async (key) => {
-    const val = n(mesEdit.gastos[key]);
-    const newRec = { ...recurrentes };
-    if (recurrentes[key] !== undefined) delete newRec[key]; else newRec[key] = val || 0;
-    await saveData({ ...appData, gastosRecurrentes: newRec });
-  };
-  const updateRecurrente = async (key, value) => {
-    if (!recurrentes[key]) return;
-    await saveData({ ...appData, gastosRecurrentes: { ...recurrentes, [key]: n(value) } });
-  };
-
   const save = async () => {
     setSaving(true);
     const newRec = { ...recurrentes };
     claves.forEach(k => { if (recurrentes[k] !== undefined) newRec[k] = n(mesEdit.gastos[k]); });
-    const newMonthly = { ...allData, [selKey]: mesEdit };          // ya no se crea el mes siguiente con deuda
-    const ok = await saveData({ ...appData, monthly: newMonthly, gastosRecurrentes: newRec });
+    const ok = await saveData({ ...appData, monthly: { ...allData, [selKey]: { ingresos: mesEdit.ingresos, gastos: mesEdit.gastos } }, gastosRecurrentes: newRec });
     setSaving(false);
     if (ok) { setEdit(null); setSavedOk(true); setTimeout(() => setSavedOk(false), 3000); }
   };
 
+  // ── historial (el cierre guardado manda sobre el recálculo) ──
   const savedKeys = Object.keys(allData).sort();
-  const filaHist = k => calcularResultadoMensual(ctx, k);
-  const chartData = savedKeys.slice(-6).map(k => {
-    const t = filaHist(k);
-    return { mes:fmtKey(k).split(' ')[0].substring(0,3), Ingresos:t.ing, Gastos:t.gas, Saldo:Math.max(0,t.saldo) };
-  });
+  const filaHist = (k) => {
+    const c = (appData.cierres || {})[k];
+    if (c) return { ing: c.resultado.ingresos, gas: c.resultado.gastos, egresos: c.resultado.gastos, saldo: c.resultado.saldo, frozen: true };
+    const r = calcularResultadoMensual({ appData, zapiaData, tarjetasData, mesKey: k });
+    return { ing: r.ingresos.total, gas: r.gastos.total, egresos: r.gastos.total, saldo: r.saldo };
+  };
+  const chartData = savedKeys.slice(-6).map(k => { const t = filaHist(k); return { mes: fmtKey(k).split(' ')[0].substring(0,3), Ingresos: t.ing, Gastos: t.gas, Saldo: Math.max(0, t.saldo) }; });
   let rAcum = 0;
-  const ahorroChart = [...ahorroMovimientos].sort((a,b)=>String(a.fecha).localeCompare(String(b.fecha))).map(m => {
+  const ahorroChart = [...ahorroMovimientos].sort((a,b) => String(a.fecha).localeCompare(String(b.fecha))).map(m => {
     rAcum += m.tipo === 'retiro' ? -n(m.monto) : n(m.monto);
     return { mes: m.fecha.split('-').reverse().slice(0,2).join('/'), 'Ahorro': rAcum };
   });
   const histRows = savedKeys.map(k => ({ k, ...filaHist(k) })).reverse();
 
   const btnBg = savedOk ? 'bg-positive' : syncStatus==='error' ? 'bg-negative' : saving||syncing ? 'bg-muted-light' : 'bg-tab-tarjetas';
-  const btnTx = savedOk ? '✓  Guardado y sincronizado' : syncStatus==='error' ? '✗  No se pudo sincronizar — reintentá' : saving||syncing ? '☁️  Guardando...' : '💾  Guardar y sincronizar';
-
+  const btnTx = savedOk ? '✓  Guardado y sincronizado' : syncStatus==='error' ? '✗  No se pudo sincronizar — reintentá' : saving||syncing ? '☁️  Guardando...' : '💾  Guardar importes y sincronizar';
+  const meta = n(metaAhorro);
   const TABS = [['mes','📅 Mes'],['historial','📊 Historial'],['ahorros','💰 Ahorros'],['control','📊 Control'],['cierre','🧮 Cierre']];
 
   return (
@@ -412,6 +354,12 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
         )}
       </div>
 
+      {backendInfo !== null && backendInfo !== undefined && !/^7\./.test(String(backendInfo)) && (
+        <div className="mb-3 rounded-xl bg-accent-soft border border-[#E9BE8F] px-3.5 py-2.5 text-[11px] text-accent-strong leading-relaxed">
+          ⚠️ El Apps Script publicado no es la v7.0{backendInfo ? ` (es la ${backendInfo})` : ''}: las tablas nuevas, los encabezados de Control y los movimientos provisorios no funcionan hasta actualizarlo. Pegá <strong>apps_script_v7.js</strong> en Apps Script y publicá una versión nueva.
+        </div>
+      )}
+
       {/* Selector de período: vale para TODAS las pestañas de Principal */}
       <select value={selKey} onChange={e=>{setSelKey(e.target.value);setEdit(null);}}
         className="w-full px-3.5 py-2.5 rounded-lg border-[1.5px] border-border text-sm mb-3 bg-white text-ink font-semibold cursor-pointer">
@@ -428,42 +376,112 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
 
       {tab==='mes' && (
         <>
-          {mostrarCaja && (
-            <CajaCard caja={caja} hoyStr={hoyStr} etiquetas={etiquetas} mesActual={selKey}
-              onPagar={marcarPago} pagadosManual={pagadosManual} onDeshacer={deshacerPago}/>
-          )}
+          {/* A. Disponibilidad familiar: saldos REALES declarados. No suma ingresos, transferencias ni sueldo pendiente. */}
+          <div className="bg-ink text-white rounded-2xl px-5 py-4 mb-3.5 shadow-md">
+            <div className="text-[11px] font-bold uppercase tracking-wide opacity-80">Disponibilidad familiar{esMesActual ? '' : ' (al cierre del mes)'}</div>
+            <div className="text-[34px] font-extrabold tracking-tight tabular-nums mt-1">{(disp.uala || disp.efectivo) ? $$(disp.total) : '—'}</div>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <div className="bg-white/10 rounded-lg px-3 py-2"><div className="text-[10px] opacity-80">Saldo real en Uala{disp.uala ? ` · ${fmtDate(new Date(disp.uala.fecha+'T12:00:00'))}` : ''}</div><div className="text-[16px] font-extrabold tabular-nums">{disp.uala ? $$(disp.uala.valor) : '—'}</div></div>
+              <div className="bg-white/10 rounded-lg px-3 py-2"><div className="text-[10px] opacity-80">Efectivo real{disp.efectivo ? ` · ${fmtDate(new Date(disp.efectivo.fecha+'T12:00:00'))}` : ''}</div><div className="text-[16px] font-extrabold tabular-nums">{disp.efectivo ? $$(disp.efectivo.valor) : '—'}</div></div>
+            </div>
+            {esMesActual && (ob.totales.aPagar > 0) && (
+              <div className={`mt-3 rounded-lg px-3 py-2 text-[12px] font-bold ${cobertura.alcanza ? 'bg-positive/30' : 'bg-negative/40'}`}>
+                {cobertura.alcanza ? `✓ Alcanza para lo vencido y pendiente (${$$(cobertura.aPagar)}): sobran ${$$(cobertura.balance)}` : `⚠️ Para lo vencido y pendiente (${$$(cobertura.aPagar)}) faltan ${$$(Math.abs(cobertura.balance))}`}
+              </div>
+            )}
+            <div className="text-[10px] opacity-70 mt-2 leading-relaxed">Es plata real declarada, no ganancia. No incluye el sueldo pendiente de cobro ni lo estimado.</div>
+          </div>
 
+          {/* B. Ingresos familiares */}
           <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
             <div className="bg-positive text-white px-4 py-2.5 font-bold text-[13px]">💵 Ingresos familiares</div>
-            <div className="px-4 py-2.5 border-b border-border-soft">
-              <div className="flex items-center">
-                <span className="text-lg mr-2.5">👩</span>
-                <div className="flex-1">
-                  <div className="text-[13px] text-ink font-medium">Sueldo de Julieta</div>
-                  <div className="text-[11px] text-muted-light">Cobra el último día hábil ({fmtDate(new Date(ultimoDiaHabil(selKey)+'T12:00:00'))}): sirve para pagar desde esa fecha</div>
+            <div className="flex items-center px-4 py-3 border-b border-border-soft">
+              <span className="text-lg mr-2.5">👩</span>
+              <div className="flex-1">
+                <div className="text-[13px] text-ink font-medium">Sueldo de Julieta</div>
+                <div className="text-[11px] text-muted-light">
+                  {situ.ingresos.sueldo.estado === 'cobrado' ? `Cobrado el ${fmtDate(new Date(situ.ingresos.sueldo.fechaCobro+'T12:00:00'))}` : `Pendiente de cobro · se cobra el ${fmtDate(new Date(situ.ingresos.sueldo.fechaCobro+'T12:00:00'))} (último día hábil)`}
+                  {sueldoRecurrente ? ' · 🔁 recurrente' : ''}
                 </div>
-                <button onClick={toggleSueldoRecurrente} title="Cobra siempre lo mismo: se completa solo en los meses que vienen"
-                  className={`border-none rounded-md cursor-pointer text-[13px] px-2 py-1 mr-1.5 touch-manipulation ${sueldoRecurrente?'bg-accent-soft text-accent-strong':'bg-border-soft text-muted-light'}`}>🔁</button>
-                <div className="flex items-center gap-1">
-                  <span className="text-muted-light text-[13px]">$</span>
+              </div>
+              <span className={`text-base font-extrabold tabular-nums ${situ.ingresos.sueldo.estado==='cobrado'?'text-positive':'text-muted'}`}>{n(mesEdit.ingresos.julieta) > 0 ? $$(n(mesEdit.ingresos.julieta)) : '—'}</span>
+            </div>
+            <button onClick={() => setVerUala(v => !v)} className="w-full flex justify-between items-center px-4 py-3 bg-positive-soft border-none cursor-pointer text-left touch-manipulation">
+              <div className="pr-2">
+                <div className="text-[13px] text-positive font-semibold">👨 Germán · saldo de Uala {verUala ? '▲' : '▼'}</div>
+                <div className="text-[11px] text-muted-light">{disp.uala ? `Declarado por Julieta el ${fmtDate(new Date(disp.uala.fecha+'T12:00:00'))}, tal cual. Tocá para ver la conciliación.` : 'Todavía sin declarar. Tocá para ver el detalle.'}</div>
+              </div>
+              <span className="text-base font-extrabold tabular-nums text-positive">{disp.uala ? $$(disp.uala.valor) : '—'}</span>
+            </button>
+            {verUala && (
+              <div className="border-t border-border-soft">
+                <ConciliacionUalaDetalle conciliacion={situ.conciliacionUala}/>
+                <button onClick={() => setTab('control')} className="w-full py-2 border-none border-t border-border-soft bg-paper text-[12px] font-bold text-tab-tarjetas cursor-pointer touch-manipulation">Ver todo en Control ›</button>
+              </div>
+            )}
+          </div>
+
+          {/* C. Gastos fijos y obligaciones: vencidas, pendientes y próximos compromisos estimados */}
+          <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
+            <div className="bg-negative text-white px-4 py-2.5 font-bold text-[13px] flex justify-between">
+              <span>📤 Gastos fijos y obligaciones</span><span className="text-[11px] opacity-80 font-normal">por vencimiento</span>
+            </div>
+            {esMesActual ? (
+              <>
+                <SeccionObligaciones titulo="Vencidas impagas" color="text-negative" lista={ob.vencidas} total={ob.totales.vencido} etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>
+                <SeccionObligaciones titulo="Pendientes actuales" color="text-ink" lista={ob.pendientes} total={ob.totales.pendiente} etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>
+                <SeccionObligaciones titulo="Próximos compromisos (estimados)" color="text-muted" lista={ob.estimados} total={ob.totales.estimado} nota="Estimados: no cuentan en el resultado ni en lo que hay que pagar hoy. Se reemplazan por el importe definitivo cuando llega." etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>
+                {ob.vencidas.length + ob.pendientes.length + ob.estimados.length === 0 && (
+                  <div className="px-4 py-3 text-[12px] text-muted-light">No hay obligaciones con vencimiento cargado. Poné la fecha (📅) en "Editar importes y vencimientos".</div>
+                )}
+              </>
+            ) : (
+              <SeccionObligaciones titulo={`Obligaciones de ${fmtKey(selKey)}`} color="text-ink" lista={obligacionesMes} total={obligacionesMes.reduce((s,o) => s + o.monto, 0)} etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>
+            )}
+            {sinFecha.length > 0 && (
+              <div className="px-4 py-2 text-[11px] text-accent-strong bg-[#FFFBF5] border-t border-border-soft">⚠️ Sin fecha de vencimiento: {sinFecha.map(k => etiquetas[k] || k).join(', ')}. Cargá el 📅 para que aparezcan como obligaciones.</div>
+            )}
+            {ob.pagadas.length > 0 && (
+              <div className="border-t border-border-soft">
+                <button onClick={() => setVerPagadas(v => !v)} className="w-full px-4 py-2 border-none bg-white text-[11px] font-bold text-muted text-left cursor-pointer touch-manipulation">✓ Pagadas ({ob.pagadas.length}) {verPagadas ? '▲' : '▼'}</button>
+                {verPagadas && ob.pagadas.slice(0, 15).map(o => <ObligacionRow key={o.id} o={o} etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>)}
+              </div>
+            )}
+          </div>
+
+          {/* D. Resultado mensual: económico, distinto de la disponibilidad */}
+          <div className={`rounded-2xl px-4 py-3 mb-3.5 border-2 ${res.saldo>=0?'bg-positive-soft border-[#68D391]':'bg-negative-soft border-[#FC8181]'}`}>
+            <div className="flex justify-between items-center">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wide text-muted">{res.saldo>=0?'Resultado mensual · a favor':'Resultado mensual · déficit'}</div>
+                <div className="text-[11px] text-muted mt-0.5">Ingresos {$$(res.ingresos.total)} − gastos {$$(res.gastos.total)}{meta>0 ? ` · meta ${$$(meta)}` : ''}</div>
+              </div>
+              <div className={`text-[26px] font-extrabold tracking-tight tabular-nums ${res.saldo>=0?'text-positive':'text-negative'}`}>{res.ingresos.total===0&&res.gastos.total===0 ? '—' : neg(res.saldo)}</div>
+            </div>
+            <div className="text-[10px] text-muted-light mt-1.5 leading-relaxed">Sueldo + bruto Uber/DiDi − gastos de Zapia − tarjetas del mes − fijos. No es la disponibilidad ni cuenta transferencias, saldos ni lo estimado.</div>
+          </div>
+
+          {/* E. Ahorros (cargados a mano) */}
+          <button onClick={() => setTab('ahorros')} className="w-full rounded-lg px-4 py-2.5 mb-3.5 bg-gradient-to-r from-positive-soft to-[#B2F5EA] border-[1.5px] border-[#81E6D9] flex justify-between items-center cursor-pointer touch-manipulation text-left">
+            <span className="text-[13px] font-semibold text-[#234E52]">💰 Ahorro (cargado a mano) ›</span>
+            <span className="text-lg font-extrabold text-[#2B7A78] tabular-nums">{$$(calcularAhorroManual(ahorroMovimientos))}</span>
+          </button>
+
+          {/* Importes del mes (edición): se guarda con el botón */}
+          <button onClick={() => setEditarImportes(v => !v)} className="w-full py-2.5 mb-3.5 border-[1.5px] border-border rounded-xl bg-white text-[13px] font-bold text-muted cursor-pointer touch-manipulation">
+            ✏️ {editarImportes ? 'Ocultar' : 'Editar'} importes y vencimientos de {fmtKey(selKey)}
+          </button>
+          {editarImportes && (
+            <>
+              <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
+                <div className="bg-positive text-white px-4 py-2.5 font-bold text-[13px]">👩 Sueldo de Julieta</div>
+                <div className="flex items-center px-4 py-2.5">
+                  <div className="flex-1 text-[11px] text-muted-light">Cobra siempre lo mismo: con 🔁 se completa solo en los meses que no cargues otro importe.</div>
+                  <button onClick={toggleSueldoRecurrente} className={`border-none rounded-md cursor-pointer text-[13px] px-2 py-1 mr-1.5 touch-manipulation ${sueldoRecurrente?'bg-accent-soft text-accent-strong':'bg-border-soft text-muted-light'}`}>🔁</button>
+                  <span className="text-muted-light text-[13px] mr-1">$</span>
                   <MoneyInput width={110} value={mesEdit.ingresos.julieta} onChange={updateSueldo}/>
                 </div>
               </div>
-              {sueldoRecurrente && <div className="text-[10px] text-accent-strong mt-1 pl-8">🔁 Se completa solo en los meses que no cargues otro importe.</div>}
-            </div>
-            <div className="flex justify-between items-center px-4 py-2.5 bg-positive-soft">
-              <div className="pr-2">
-                <div className="text-[13px] text-positive font-semibold">👨 Germán · saldo de la Uala</div>
-                <div className="text-[11px] text-muted-light">
-                  {saldoDecl
-                    ? <>Declarado por Julieta el {fmtDate(new Date(saldoDecl.fecha+'T12:00:00'))}: <strong>{$$(saldoDecl.valor)}</strong>{(caja.pagadoDespues>0 || caja.gastosUala>0) ? ' · hoy, después de pagos y gastos por transferencia' : ''}.</>
-                    : 'Todavía sin declarar este mes: se muestra cuando Julieta cargue su saldo.'}
-                </div>
-              </div>
-              <span className={`text-base font-extrabold tabular-nums ${caja.ualaHoy<0?'text-negative':'text-positive'}`}>{(saldoDecl || caja.ualaHoy!==0) ? (caja.ualaHoy<0?`-${$$(Math.abs(caja.ualaHoy))}`:$$(caja.ualaHoy)) : '—'}</span>
-            </div>
-          </div>
-
           <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
             <div className="bg-negative text-white px-4 py-2.5 font-bold text-[13px] flex justify-between">
               <span>📤 Gastos fijos</span><span className="text-[11px] opacity-80 font-normal">tocá uno para ver su detalle</span>
@@ -545,25 +563,16 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
             )}
             <div className="flex justify-between items-center px-4 py-2.5 bg-paper border-t-2 border-border-soft">
               <span className="text-[13px] font-bold text-negative">Total gastos fijos</span>
-              <span className="text-base font-extrabold text-negative tabular-nums">{$$(tot.egresos)}</span>
+              <span className="text-base font-extrabold text-negative tabular-nums">{$$(totalFijos(mesEdit.gastos))}</span>
             </div>
           </div>
 
-          <div className={`rounded-2xl px-4 py-3 mb-3.5 border-2 flex justify-between items-center ${tot.saldo>=0?'bg-positive-soft border-[#68D391]':'bg-negative-soft border-[#FC8181]'}`}>
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-muted">{tot.saldo>=0?'Resultado mensual · a favor':'Resultado mensual · déficit'}</div>
-              <div className="text-[11px] text-muted mt-0.5">Sueldo de Julieta + saldo de la Uala − gastos fijos{meta>0&&tot.ing>0 ? ` · meta ${$$(meta)}` : ''}</div>
-            </div>
-            <div className={`text-[26px] font-extrabold tracking-tight tabular-nums ${tot.saldo>=0?'text-positive':'text-negative'}`}>{tot.ing===0&&tot.gas===0?'—':(tot.saldo<0?'-':'')+$$(Math.abs(tot.saldo))}</div>
-          </div>
 
-          <button onClick={save} disabled={saving||syncing}
-            className={`w-full py-3.5 border-none rounded-xl cursor-pointer font-bold text-[15px] text-white shadow-md transition-colors mb-1 touch-manipulation ${btnBg}`}>
-            {btnTx}
-          </button>
-          <p className="text-center text-[11px] text-muted-light mt-1.5">
-            Se confirma contra Google Drive antes de avisar · 🔁 = recurrente · 💳 = cargado desde Gastos
-          </p>
+              <button onClick={save} disabled={saving||syncing}
+                className={`w-full py-3.5 border-none rounded-xl cursor-pointer font-bold text-[15px] text-white shadow-md transition-colors mb-1 touch-manipulation ${btnBg}`}>{btnTx}</button>
+              <p className="text-center text-[11px] text-muted-light mt-1.5 mb-3.5">Se confirma contra Google Drive antes de avisar · 🔁 = recurrente · 💳 = cargado desde Gastos</p>
+            </>
+          )}
 
           {detalleFijo && (
             <DetalleFijoModal titulo={etiquetas[detalleFijo] || detalleFijo} mesLabel={fmtKey(selKey)}
@@ -601,9 +610,9 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
               <table className="w-full border-collapse text-xs">
                 <thead><tr className="bg-border-soft">{['Mes','Ingresos','Egresos','Resultado'].map(h=><th key={h} className={`px-2.5 py-2 ${h==='Mes'?'text-left':'text-right'} text-muted font-bold border-b border-border text-[10px] uppercase`}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {histRows.map(({k,ing,egresos,saldo},i)=>(
+                  {histRows.map(({k,ing,egresos,saldo,frozen},i)=>(
                     <tr key={k} onClick={()=>{setSelKey(k);setEdit(null);setTab('mes');}} className={`cursor-pointer ${i%2===0?'bg-white':'bg-paper'}`}>
-                      <td className="px-2.5 py-2.5 font-semibold text-ink">{fmtKey(k)}{k===currentKey&&<span className="ml-1 text-[9px] bg-tab-tarjetas text-white rounded px-1 py-0.5">actual</span>}</td>
+                      <td className="px-2.5 py-2.5 font-semibold text-ink">{fmtKey(k)}{frozen&&<span title="Cierre guardado" className="ml-1">🔒</span>}{k===currentKey&&<span className="ml-1 text-[9px] bg-tab-tarjetas text-white rounded px-1 py-0.5">actual</span>}</td>
                       <td className="px-2.5 py-2.5 text-right text-positive tabular-nums">{$$(ing)}</td>
                       <td className="px-2.5 py-2.5 text-right text-negative tabular-nums">{$$(egresos)}</td>
                       <td className={`px-2.5 py-2.5 text-right font-extrabold tabular-nums ${saldo>=0?'text-positive':'text-negative'}`}>{$$(saldo)}</td>
@@ -659,11 +668,11 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
       )}
 
       {tab==='control' && (
-        <Control embebido appData={appData} saveData={saveData} zapiaData={zapiaData} onRefresh={onRefresh} mesKey={selKey}/>
+        <Control embebido appData={appData} saveData={saveData} zapiaData={zapiaData} tarjetasData={tarjetasData} tarjetasProv={tarjetasProv} onRefresh={onRefresh} mesKey={selKey}/>
       )}
 
       {tab==='cierre' && (
-        <CierreReal embebido appData={appData} zapiaData={zapiaData} tarjetasData={tarjetasData} onRefresh={onRefresh} mesKey={selKey}/>
+        <CierreReal embebido appData={appData} saveData={saveData} zapiaData={zapiaData} tarjetasData={tarjetasData} tarjetasProv={tarjetasProv} onRefresh={onRefresh} mesKey={selKey}/>
       )}
     </div>
   );

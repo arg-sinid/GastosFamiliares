@@ -1,125 +1,83 @@
-# GastosFamiliares v5 — cambios, migración y pendientes
+# GastosFamiliares v7.0 — arquitectura, fórmulas, migración y límites
 
-## Orden de despliegue (importante)
-1. **Primero** pegar `backend/apps_script_v6.js` en el editor de Apps Script → Implementar → Administrar implementaciones → ✏️ → Nueva versión. La URL no cambia.
-2. **Después** subir la app (merge a la rama que publica GitHub Pages).
-   - App nueva + backend viejo: la app lo detecta (no hay `version`) y no deja guardar.
-   - App vieja en caché + backend nuevo: el backend rechaza el guardado ("app desactualizada"). No se pisa nada.
+## 1. Diagnóstico (qué estaba mal en la v6)
+- **Tres motores distintos para lo mismo.** `utils.js` calculaba el "resultado mensual" de Principal (sueldo + saldo de la Uala − fijos: mezclaba un SALDO con ingresos), `CierreReal` calculaba otro (bruto − gastos) y la hoja Control otro más. Principal y Cierre no podían coincidir.
+- **El efectivo no se conciliaba.** Solo había un control del lado de Germán (bruto vs. usos) que además sumaba el depósito de fin de mes dos veces.
+- **Vencimientos se daban por pagados al pasar la fecha** (y se ocultaban por regla del día 25): una deuda vieja desaparecía sola.
+- **El saldo de la Uala "vivo"** restaba pagos estimados y se alejaba del saldo real declarado.
+- Cálculos y vistas mezclados: cada pantalla recalculaba por su cuenta.
 
-## Migración de datos (no destructiva)
-- El estado sigue en la hoja oculta `_app_data_`. Formato nuevo: JSON partido en celdas de 40.000 caracteres (columna A) + marca de versión en `B1`.
-- Formato viejo (todo en A1) se lee igual (versión 0). **Antes de la primera escritura** el backend crea la hoja oculta `_backup_pre_v6_<fecha>` con el JSON original intacto.
-- La celda A1 original se sobrescribe recién con el primer guardado; el backup es el respaldo.
-- Recuperación: en el editor de Apps Script ejecutar `restaurarBackup("_backup_pre_v6_...")`. También existe `crearBackupManual()`.
-- Validación: comparar en Drive la cantidad de registros de Uber/DiDi, saldos y ahorros antes/después (el backup está en la misma planilla).
-- Campo nuevo `autoDetalle` (detalle de mantenimiento): arranca vacío, no toca datos viejos.
+## 2. Arquitectura final
+```
+src/motor.js          ← ÚNICO motor financiero (puro, sin React ni guardado)
+src/utils.js          ← helpers: formato, fechas, ítems de Gastos, Auto, vehículos, normalización de datos
+src/sync.js           ← persistencia/sincronización con control de concurrencia
+src/App.jsx           ← carga/guarda; pasa datos; NO calcula plata
+src/apps/ControlGastos.jsx  (Principal) · Control.jsx · CierreReal.jsx · Gastos.jsx · Auto.jsx   ← solo muestran
+src/components/conciliacion.jsx   ← vistas de conciliación compartidas (Control y Principal)
+backend/apps_script_v7.js          ← Apps Script (solo persistencia y tablas derivadas)
+```
+`construirSituacion({appData, zapiaData, tarjetasData, tarjetasProvisorias, mesKey, hoyStr})` devuelve TODO lo que muestran las pantallas: disponibilidad, ingresos, conciliaciones (Uala y efectivo), obligaciones, cobertura, resultado y ahorro. La hoja "Control 2026" y las tablas legibles de Google Sheets salen del mismo motor.
 
-## Reglas de negocio aplicadas (confirmadas por Germán)
-- Ingreso de Germán en Principal = saldo de la Uala TAL CUAL lo declara Julieta (último saldo del mes). Sin sumas ni restas: ni movimientos posteriores, ni gastos de Zapia (salen de ese saldo), ni diferencia de conciliación. Mes sin declaración todavía: 0.
-- Saldo esperado = saldo real anterior + transferencias de domingos + depósito de fin de mes − gastos de Zapia de Julieta (efectivo y transferencia).
-- Diferencia = real − esperado. Negativa = gasto hormiga, positiva = sobrante. Solo control: nunca se resta del resultado.
-- Germán: bruto Uber/DiDi vs (sus gastos de Zapia + girado/depositado a Uala + efectivo que queda). Misma convención de signo.
-- Tarjetas: se descuentan en Principal (fijos), no del saldo de Uala.
-- Resultado mensual: UNA función (`calcularResultadoMensual`), usada por Principal, Historial, Ahorros y la hoja Control.
-- "Cierre económico" (ex Cierre Real) es otro indicador, con otro nombre: bruto del auto − todos los gastos.
+## 3. Fórmulas definitivas
+| Concepto | Fórmula |
+|---|---|
+| Transferencia dominical | bruto Uber/DiDi − gastos personales de Germán por transferencia (es un movimiento entre bolsillos, **no** un ingreso) |
+| Aportes a la Uala | transferencias de Germán + efectivo depositado a fin de mes (`efectivoCierreMes`) |
+| Saldo esperado de la Uala | saldo anterior confirmado + aportes − gastos de **Julieta** por transferencia |
+| Diferencia Uala | saldo declarado − esperado (negativa = posible gasto hormiga; positiva = sobrante a justificar) |
+| Efectivo esperado | efectivo anterior + (bruto − gastos de Germán por transferencia) − transferencia a la Uala − depósito de fin de mes − gastos en efectivo de Germán y de Julieta |
+| Disponibilidad familiar | saldo real de la Uala (último declarado) + efectivo real (último declarado) |
+| Resultado mensual | (sueldo de Julieta + bruto Uber/DiDi del mes) − (gastos de Zapia del mes + tarjetas del mes + fijos sin tarjeta) |
+| Cobertura | disponibilidad − (vencido + pendiente definitivo). No cuenta sueldo pendiente ni estimados |
+| Ahorro | solo movimientos cargados a mano |
 
-## Cambios de comportamiento que van a mover números
-1. **Mes abierto de Germán**: muestra el saldo declarado (corregido en v5.1; en v5.0 mostraba la suba del saldo).
-2. **Depósito de fin de mes**: ya no se suma aparte (estaba contado dos veces).
-3. **Gastos de Julieta**: ahora restan efectivo Y transferencia (antes solo transferencia).
-4. **Hormiga**: ya no se recorta en 0; puede ser negativa o positiva.
-5. En meses cerrados la suba del saldo puede ser negativa (ya no se recorta en 0).
-6. **Hoja Control** y **Principal** usan ahora el mismo cálculo (antes la hoja usaba los valores manuales de tarjeta por un bug de closure).
-7. **Categorías**: se agregan Combustible, Mantenimiento y Peajes/TelePASE. Las compras de tarjeta sin categoría guardada se clasifican al vuelo, así que lo que antes caía en "Auto" ahora cae en la categoría fina (montos y totales NO cambian). Lo ya guardado por vos en categorías no se toca; lo que quedó en "Auto" aparece en Auto → "por clasificar".
-8. Palabras cortas ("pan", "dia") ahora coinciden solo como palabra completa (pantalon ≠ pan).
+Qué gastos salen de dónde: Germán/transferencia → de su bruto (ya neto en la transferencia); Julieta/transferencia → Uala; Germán o Julieta/efectivo → fondo de efectivo común.
 
-## Para comparar antes/después
-Sacá captura de Principal (Historial) de los últimos meses ANTES de actualizar. Las diferencias esperadas están solo en los puntos 1–5.
+## 4. Conciliación de la Uala: análisis y decisión
+La regla acordada ("transferencias − gastos de Julieta debería coincidir con el saldo declarado") se probó contra las dos formas posibles, con los saldos históricos que mostraba la app (27/09 = 425.000, 25/10 = 800.000, 01/11 = 740.000):
 
-## Pendientes / no tocado a propósito
-- **Ahorro acumulado**: sigue sumando saldos mensuales positivos, incluido el mes en curso (provisorio). Propuesta: contar solo meses cerrados. Necesito tu decisión.
-- La deuda del mes anterior sigue guardándose en el mes siguiente al guardar (regla original).
-- Compras de tarjeta en cuotas quedan en "Cuotas" aunque las hayas categorizado como mantenimiento (precedencia original).
-- Lo que Zapia carga en `Registro Diario` no tiene id propio: el backend lo genera (hash de fecha|hora|quién|qué|costo + contador).
-- Deduplicación de PDFs: por `id_unico` (filas sin id nunca se descartan).
-- Ocultar importes: enmascara textos y gráficos; los campos donde escribís siguen visibles.
-- No se ejecutó `vite build` en mi entorno (sin red): correr `npm run build` en Termux.
-- Seguridad: la URL del Apps Script sigue siendo el único secreto.
+| Período | Alternativa A: saldo anterior + aportes − gastos | Alternativa B: solo aportes − gastos |
+|---|---|---|
+| 27/09 → 25/10 | −225.000 | **+200.000** |
+| 25/10 → 01/11 | −49.100 | **+750.900** |
 
-## v5.2 — Vencimientos y varios vehículos
-**Datos nuevos** (arrancan vacíos, no tocan nada existente): `vencimientos` (clave del fijo → `{dia, mesSiguiente}`), `vehiculos` (id, marca, modelo, patente, año) y `gastoVehiculo` (id del gasto → id del vehículo).
-- **Vencimientos:** cada gasto fijo tiene un botón 📅 para cargar el día de vencimiento (se repite todos los meses). Por defecto ICBC, Banco Nación y Préstamos se marcan "del mes siguiente" (el resumen de octubre vence en noviembre); es editable.
-- **Principal:** mientras queden vencimientos sin pasar, arriba de todo se ve cuánto hace falta reunir para el próximo (y acumulado por fecha) contra lo disponible = sueldo de Julieta + saldo de la Uala. Solo cuentan los fijos con fecha cargada. Cuando pasan todos, la tarjeta desaparece y queda el resultado mensual como siempre (que se sigue viendo debajo mientras tanto).
-- **Vehículos:** en Auto → "Vehículos y gastos" se agregan/editan/quitan vehículos (marca, modelo, patente, año; la patente no se puede repetir). Se elige el vehículo antes de ver el mes.
-- **Imputación:** el gasto se carga una sola vez en Gastos. Al categorizarlo como Combustible, Mantenimiento, Peajes/TelePASE o Auto, si hay más de un vehículo se pregunta a cuál corresponde. También se puede cambiar desde Auto. Los gastos sin asignar (y todos los anteriores) van al primer vehículo.
-- La suma de los vehículos coincide con el total de Gastos. El bruto de Uber/DiDi no se reparte por vehículo, así que la rentabilidad se calcula contra todos los vehículos.
-- El detalle de mantenimiento (km, próximo cambio) y el "último km" son por vehículo.
-- Backend: `apps_script_v6.js` cambió solo en los valores por defecto de los campos nuevos. Actualizarlo es opcional (los datos nuevos se guardan igual).
+**Identidad:** `difB − difA = saldo anterior`. B solo equivale a A si la cuenta arrancó el período en 0; como la Uala acumula saldo, B atribuye el saldo previo a "sobrante" y da diferencias absurdas. **Se adopta A**, y se muestra con la regla acordada expresada como **variación**: variación esperada (transferencias − gastos) vs. variación real (saldo declarado − saldo anterior), con el "saldo anterior confirmado" visible en pantalla. La primera declaración es solo punto de partida (sin base no hay diferencia). No se modifica ningún saldo declarado ni se esconde la diferencia. Cada saldo se usa una vez como inicio del período siguiente; un gasto del mismo día de la declaración pertenece al período que esa declaración cierra.
 
-## v5.3 — Saldo de la Uala tal cual y sin arrastre de deuda
-- **Germán · saldo de la Uala** = el último saldo que declaró Julieta en el mes, exacto (con la fecha de la carga). Vale para todos los meses.
-- (Reemplazado en v5.4 por el saldo vivo, ver abajo.)
-- **Deuda arrastrada eliminada**: ya no se muestra ni se crea el mes siguiente con deuda al guardar. El campo `deuda_anterior` de meses viejos se conserva guardado pero se ignora en las cuentas.
-- Control (conciliación) no cambia: sigue mostrando esperado, real y diferencia/hormiga como control.
+## 5. Control del efectivo: contradicción detectada
+Tomadas literalmente, las dos reglas se contradicen: si la transferencia es `B − Gt` y el efectivo esperado es `anterior + B − T − gastos`, el efectivo termina sumando `+Gt` (los gastos de Germán por transferencia) sin ninguna entrada real. **Criterio adoptado:** en la fórmula de efectivo se usa el bruto **neto** de esos gastos (`B − Gt`), porque la transferencia ya los tiene descontados. Además se descuenta el depósito de fin de mes (`efectivoCierreMes`: efectivo que pasa a la Uala; es otro campo que `efectivoEnMano`, que es el efectivo declarado). Se muestra el "efectivo retenido" (`B − Gt − T`). Una declaración de efectivo REEMPLAZA a la anterior. Limitación: una declaración en 0 solo se reconoce si el registro de Auto tiene `efectivoDeclarado` (los registros nuevos lo guardan).
 
-## v5.4 — Saldo vivo de la Uala y ahorro solo manual
-- **Fijos y tarjetas** se pagan por la contabilidad de Principal en los primeros días del mes: ahí sale el dinero de la Uala (confirmado por Germán). Los gastos de Zapia de Julieta también salen de la Uala y se ven en Control.
-- **Saldo vivo:** el saldo declarado el domingo se mantiene tal cual hasta que llega un vencimiento de Principal (fecha anterior a hoy). Desde ahí se va usando: primero el sueldo de Julieta que quede y lo que falte sale de la Uala (puede quedar negativa; provisorio hasta que Julieta declare). Los pagos anteriores a la declaración ya están reflejados en ese saldo. Un vencimiento cuenta como pagado al día siguiente de su fecha (el día que vence figura "vence hoy"). No incluye transferencias ni gastos de Zapia posteriores a la carga (se ven en Control).
-- **El resultado mensual no cambia**: sueldo de Julieta + saldo declarado − gastos fijos. El saldo vivo es una vista de cuánto queda hoy.
-- **Disponible para vencimientos** = sueldo que queda + Uala de hoy (ya descontado lo pagado).
-- **Ahorro:** ahora es solo lo que se carga a mano en Ahorros (ingresos, ajuste inicial, retiros). No suma ni resta nada automático de ingresos/egresos. Se eliminó el acumulado automático, su tabla y su gráfico (el gráfico ahora acumula solo los movimientos manuales).
-- Las etiquetas "ahorro" del resultado del mes pasaron a "a favor".
+## 6. Obligaciones (gastos fijos y vencimientos)
+Una obligación = gasto fijo + período + vencimiento + estado + pago. Estados: **vencido, pendiente, próximo a vencer (≤ 7 días), pagado**; tipo **definitivo / provisorio (estimado)**.
+- Un vencimiento **no se da por pagado por pasar la fecha**: queda vencido hasta marcarlo "✓ Pagado". Se quitó la regla de los días 25.
+- Tarjetas: el resumen anterior es la obligación actual hasta que se paga; después aparece el siguiente como **provisorio** (suma de movimientos provisorios si hay; si no, estimación = último resumen, marcada como "Estimado"). Al llegar el definitivo lo **reemplaza** (nunca se suman). Una deuda anterior impaga sigue visible mientras aparece la siguiente.
+- Alquiler/recurrentes: igual lógica; el período siguiente aparece como estimado cuando el anterior se pagó o venció.
+- Lo estimado **no entra** en el resultado ni en "lo que hay que pagar hoy". Los pagados quedan en el historial.
+- Un fijo sin 📅 no es obligación (Principal avisa cuáles faltan).
+- **Corte histórico:** las obligaciones con vencimiento anterior a `2026-11-01` (constante `OBLIGACIONES_DESDE_DEFECTO`, o `ajustes.obligacionesDesde`) se consideran historia y no aparecen como vencidas.
+- **Movimientos provisorios de tarjeta:** convención para Zapia en la hoja `Tarjetas`: `tipo_movimiento = provisorio` **o** `archivo_origen` que contenga "provisorio"/"últimos movimientos". El backend v7 los marca; la app los separa y nunca los suma a Gastos ni al resultado.
 
-## v5.5 — Pagos del mes anterior, solo transferencias de Julieta y texto del vencimiento
-- **Texto de la tarjeta de vencimientos:** arriba se lee el estado ("✓ Hay plata suficiente para pagarlo" / "⚠️ No alcanza la plata para pagarlo"); abajo, lo que hay que pagar, lo disponible hoy y cuánto sobra o falta.
-- **Pagos del mes anterior (opción B):** los vencimientos del mes anterior que caen dentro del mes que se mira (por ejemplo las tarjetas de octubre pagadas el 3 y 4/11) se restan del saldo de la Uala a partir del día siguiente a su fecha, y solo si son posteriores a la declaración del domingo. Salen primero del sueldo de su propio mes (octubre) y después de la Uala. La Uala puede quedar negativa hasta que Julieta declare de nuevo. Los anteriores a la declaración ya están reflejados en ese saldo.
-- **Gastos de Julieta por Zapia:** de la Uala solo salen los cargados por Julieta en modo **transferencia** (en la conciliación de Control y en el saldo de Principal). Los de efectivo y los de Germán no restan. En Principal bajan el saldo los posteriores a la declaración.
-- No cambia el resultado mensual (sueldo + saldo declarado − fijos) ni el ahorro manual.
+## 7. Cierre e historial
+Cierre usa el mismo motor y distingue: ingresos reales, gastos reales, resultado, saldos reales, obligaciones (vencidas/pendientes/estimadas) y ahorros. **🔒 Cerrar mes** guarda una foto (`cierres[mes]`); el historial la usa sin recalcular y, si después los datos cambiarían el resultado, lo avisa en vez de pisarla.
 
-## v5.6 — Principal reordenado, vencimientos con "Pagado" y Control corregido
-**Principal → Mes**
-- Orden nuevo: (1) Vencimientos, solo cuando corresponde; (2) Ingresos familiares; (3) Gastos fijos, con el resultado mensual como una línea al pie. Se quitaron de esta pestaña la tarjeta grande de resultado, el banner de ahorro (sigue en Ahorros) y el bloque "Cómo se van pagando".
-- **Vencimientos globales:** se listan por fecha real, los más cercanos primero, aunque vengan de otro mes de Principal (las tarjetas de octubre que se pagan el 3 y 4/11 salen antes que los de diciembre).
-- **Ventana:** cada vencimiento aparece desde el 25 del mes anterior al de su fecha y se oculta cuando se paga o pasa su fecha. Si no queda ninguno visible, la tarjeta desaparece y solo se ven ingresos y gastos fijos.
-- **Marcar pagado:** cada ítem tiene "✓ Pagado" (se puede deshacer). Un pago marcado deja de ser pendiente y, desde ese día, baja el saldo.
-- **Saldo de la Uala:** cada pago (marcado o ya vencido) sale primero del sueldo de Julieta del MES EN QUE SE PAGA y después de la Uala. Los pagos anteriores a la declaración ya están reflejados en el saldo declarado. También bajan el saldo los gastos de Zapia de Julieta en modo transferencia posteriores a la declaración. Puede quedar negativo hasta que Julieta declare de nuevo.
-- Nuevo dato guardado: `pagosFijos` (id `mes|gasto` → fecha de pago). Se sincroniza entre celulares.
+## 8. Cambios que mueven números respecto de v6
+1. **Resultado mensual** de Principal ahora es el económico (igual que Cierre): ya no usa el saldo de la Uala.
+2. La **disponibilidad** es la suma de los dos saldos reales declarados (se quitó el "saldo vivo" estimado).
+3. Los vencimientos ya no se autopagan ni desaparecen por fecha.
+4. La hoja **Control 2026** cambia de columnas (`Sueldo`, `Uber/DiDi (bruto)`, `Gastos Zapia`, `Resultado del mes`…) y sus encabezados los manda la app.
+5. **Control** ahora concilia por períodos entre declaraciones (Uala y efectivo), sin vista semana/mes.
 
-**Control**
-- Julieta puede declarar el saldo **cualquier día** (selector de fecha; antes estaba atado al domingo). Semana/Mes muestran las conciliaciones cuyo cierre cae en ese período.
-- Sobre el saldo declarado se descuentan sus gastos de Zapia **por transferencia**; "transferencia" se reconoce por la raíz (transferencia, transf., etc.). La diferencia contra el próximo saldo declarado es el gasto hormiga (negativa) o sobrante (positiva).
-- Se quitó la fila "Transferido desde esa carga" cuando es 0 (aparece solo si Germán transfirió).
-- Nuevo desplegable **🔎 Qué gastos de Julieta restan**: lista los que restan, los del mismo día de la carga (ya incluidos en el saldo), los que no son transferencia y los que no se pudo identificar quién cargó. Sirve para ver por qué un gasto no está restando.
+## 9. Migración y compatibilidad de datos
+- Sin migraciones destructivas: se agregó el campo `cierres` (vacío por defecto) y `efectivoDeclarado` en registros nuevos. Todo lo anterior se lee igual (`normalizarAppData`). `deuda_anterior` de meses viejos queda guardado y se ignora. Los ids de pagos (`mes|gasto`) no cambiaron.
+- Datos históricos no se recalculan ni se reinterpretan; los saldos declarados no se tocan.
 
-## v5.7 — Las tarjetas se ven en el Principal en que se pagan
-- Los resúmenes de tarjeta se etiquetan con el mes de los gastos (p. ej. octubre) pero se pagan después. Antes Principal buscaba el resumen del MISMO mes, por eso en noviembre aparecían en 0.
-- Ahora hay un ajuste en Principal → Gastos fijos: **"En Noviembre se pagan los resúmenes de: el mes anterior (Octubre) / el mismo mes"**. Por defecto es "el mes anterior": el resumen de octubre cuenta en el Principal de noviembre y vence en diciembre (con el 📅 de la tarjeta en "mes siguiente").
-- Cada tarjeta en Principal muestra de qué resumen sale ("💳 resumen de Octubre") o "sin resumen de Octubre" si todavía no se cargó.
-- En Gastos → Tarjetas, cada resumen indica en qué Principal entra y su vencimiento ("Entra en el Principal de Noviembre · vence 03/12").
-- Afecta: total de ICBC/BNA en Principal, vencimientos (monto de la tarjeta), resultado mensual, historial y la hoja Control. NO cambia: Gastos (sigue por mes del resumen/gasto), Cierre económico y el historial de tarjetas.
-- Se guarda como `ajustes.tarjetaDesfase` (0 o 1) y se sincroniza entre celulares.
-- Atención: el Principal de octubre pasa a mostrar el resumen de septiembre. Si preferís el criterio anterior, elegí "el mismo mes".
+## 10. Apps Script
+- Archivo: `backend/apps_script_v7.js` (derivado de v6.1; el v6 queda como respaldo). **No asumir cuál está publicado:** abrir `<URL del script>?tipo=info`: si responde `{"status":"ok","backend":"7.0"}` ya está la v7; si no, la app lo avisa con un cartel en Principal.
+- Novedades de v7 sobre v6.1: endpoint `info`; marca `provisorio` en Tarjetas; encabezados de Control enviados por la app; tablas nuevas **Efectivo** y **Obligaciones** (más Ganancias Auto, Saldos Uala, Conciliaciones, Ahorros). Mismo formato de datos y de versionado: v7 y la app anterior son compatibles entre sí salvo por esas tablas/encabezados.
+- Sincronización: solo se informa "sincronizado" si el HTTP fue correcto, `status:"ok"` y el servidor devolvió la versión nueva; respuesta incompleta o error = cambios pendientes en el dispositivo.
 
-## v6.0 — Principal pensado como caja
-**Idea:** lo más importante es saber cuánta plata falta juntar para llegar a pagar los vencimientos, y cuándo.
-
-**Principal → Mes**
-- **Tarjeta "Vencimientos"** (arriba, desde el 25 del mes anterior a cada fecha y hasta que se pagan): "Falta juntar $X" o "Alcanza, sobran $X"; en qué fecha y con qué pago se queda corto; saldo de la Uala hoy; sueldo ya cobrado sin usar; y la lista por fecha, los más cercanos primero, con "✓ Pagado" y lo que queda después de cada fecha.
-- **Sueldo de Julieta con fecha de cobro:** se cobra el último día hábil del mes (lunes a viernes; no considera feriados) y recién desde ese día sirve para pagar. El sueldo de noviembre no ayuda a pagar el alquiler del 10/11: ayuda desde el 30/11. Cada pago sale primero del sueldo ya cobrado (el más viejo primero) y lo que falte, de la Uala (puede quedar negativa).
-- **Sueldo recurrente (🔁):** como cobra siempre lo mismo, se puede adelantar la carga: los meses sin importe propio toman el sueldo recurrente.
-- **Ingresos familiares:** sueldo de Julieta y saldo de la Uala hoy (declarado − pagos − gastos de Julieta por transferencia).
-- **Gastos fijos:** tocar el nombre abre el detalle. Tarjeta ICBC/BNA lleva a Gastos → Tarjetas, al resumen que corresponde. Los otros (Nicolás, Segundo, Préstamos, Alquiler…) abren un detalle donde se cargan conceptos con importe y categoría, con "usar la suma como importe del fijo" y "copiar el mes anterior". **➕ Agregar gasto fijo** crea uno nuevo (con su 📅 y 🔁); se puede quitar con la ×.
-- **Editor de vencimiento:** "del mismo mes / del mes siguiente" con la fecha resultante para el mes que se mira ("Para Noviembre vence el 10/11/2026"). Para que el alquiler del 10/11 aparezca, el alquiler tiene que estar en "del mismo mes".
-- El resultado mensual quedó en una línea al pie (sueldo + saldo de la Uala − fijos).
-
-**Control**
-- Nueva lista **Saldos declarados por Julieta** con todas las cargas: se pueden editar (fecha e importe) y borrar.
-- Se eliminó "Qué gastos de Julieta restan desde la carga…".
-
-**Google Sheets (backend v6.1, opcional pero recomendado)**
-- Además de "Control 2026" (un renglón por mes), la app deja tablas legibles que se reescriben en cada guardado: **Ganancias Auto**, **Saldos Uala**, **Conciliaciones** y **Ahorros**. Son solo de salida: editarlas en la planilla no cambia la app (para editar, usar la app).
-- El estado completo sigue en la hoja oculta `_app_data_` (JSON) y en los backups `_backup_*`.
-
-**Datos nuevos (arrancan vacíos):** `ajustes.fijosExtra`, `ajustes.sueldoJulieta`, `detalleFijos`.
-
-**Pendiente:** los "últimos movimientos" de tarjeta que se van a cargar por Zapia para ver los gastos que se van generando: falta definir en qué hoja y columna los carga Zapia.
+## 11. Riesgos y límites
+- El día de cobro del sueldo es el último día hábil (lunes a viernes); no considera feriados.
+- La estimación de tarjeta sin movimientos provisorios usa el último resumen; si no hay ninguno, no se estima.
+- Sin `efectivoDeclarado`, una declaración de efectivo en 0 de registros viejos no se detecta.
+- No se pudo ejecutar `vite build` ni probar en un celular real en el entorno de desarrollo: se verificó sintaxis, imports y nombres, 69 pruebas automáticas y una prueba de humo que renderiza todas las pantallas (con React simulado) con datos reales y vacíos.

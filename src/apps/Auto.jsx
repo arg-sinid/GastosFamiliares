@@ -1,10 +1,7 @@
 import { useState } from 'react';
 import { storage } from '../storage.js';
-import {
-  n, $$, hoy, getMonday, weekDates, dateStr, fmtDate, uid, esUltimoDiaMes, getKey, fmtKey, monthOpts,
-  mesesAtras, agruparGastosPorCategoria, resumenAuto, resumenAutoMeses, brutoUberDiDiMes,
-  vehiculoDeGasto, normPatente,
-} from '../utils.js';
+import { n, $$, hoy, getMonday, weekDates, dateStr, fmtDate, uid, esUltimoDiaMes, getKey, fmtKey, monthOpts, mesesAtras, agruparGastosPorCategoria, resumenAuto, resumenAutoMeses, vehiculoDeGasto, normPatente } from '../utils.js';
+import { brutoUberDiDiMes } from '../motor.js';
 
 const SK_VEH = 'vehiculo_activo_v1';
 
@@ -122,6 +119,7 @@ function Ganancias({ appData, saveData }) {
       id: uid(), fecha, uber:n(uber), didi:n(didi), total,
       transferencia: n(transferencia) || 0,
       efectivoEnMano: esDomingo ? n(efectivoEnMano) || 0 : 0,
+      efectivoDeclarado: esDomingo && efectivoEnMano !== '',      // una declaración en 0 también cuenta (reemplaza al efectivo anterior)
       efectivoCierreMes: esCierreMes ? n(efectivoCierreMes) || 0 : 0,
     };
     const updated = [nuevo, ...registros].sort((a,b)=>b.fecha.localeCompare(a.fecha));

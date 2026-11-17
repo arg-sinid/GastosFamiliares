@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { storage } from './storage.js';
-import {
-  calcularTotalesTarjetas, desfaseTarjetas, calcularFilasControl, calcularHojasExtra, dedupePorId, EMPTY_DATA, setOcultarMontos, hoy,
-} from './utils.js';
+import { dedupePorId, EMPTY_DATA, setOcultarMontos, hoy } from './utils.js';
+import { calcularFilasControl, calcularHojasExtra, HEADERS_CONTROL } from './motor.js';
 import { SyncEngine } from './sync.js';
 import { SkeletonHero, SkeletonRow } from './components/ui.jsx';
 import ControlGastos from './apps/ControlGastos.jsx';
@@ -76,7 +75,9 @@ export default function App() {
   const [ocultar,      setOcultar]      = useState(()=>storage.get(SK_OCULTAR)?.value === '1');
   const [appData,      setAppData]      = useState(EMPTY_DATA());
   const [zapiaData,    setZapiaData]    = useState([]);
-  const [tarjetasData, setTarjetasData] = useState([]);
+  const [tarjetasData, setTarjetasData] = useState([]);           // resúmenes DEFINITIVOS (lo único que suma en Gastos y en el resultado)
+  const [tarjetasProv, setTarjetasProv] = useState([]);           // movimientos provisorios (antes del resumen): solo alimentan obligaciones estimadas
+  const [backendInfo, setBackendInfo] = useState(null);            // versión del Apps Script publicado ('' = no informa)
   const [tarjetasLoading, setTarjetasLoading] = useState(true);
   const [loading,      setLoading]      = useState(true);
   const [loadedOk,     setLoadedOk]     = useState(false);
@@ -98,6 +99,7 @@ export default function App() {
   const urlRef = useRef(scriptUrl);      urlRef.current = scriptUrl;
   const zapiaRef = useRef(zapiaData);    zapiaRef.current = zapiaData;
   const tarjetasRef = useRef(tarjetasData); tarjetasRef.current = tarjetasData;
+  const provRef = useRef(tarjetasProv); provRef.current = tarjetasProv;
   const loadedRef = useRef(false);       loadedRef.current = loadedOk;
 
   const engineRef = useRef(null);
@@ -109,17 +111,18 @@ export default function App() {
           method:'POST', headers:{'Content-Type':'text/plain'},
           body: JSON.stringify({ baseVersion, data, ...extra }),
         });
+        // Solo vale como respuesta si el HTTP fue correcto; el motor exige además status "ok" y versión nueva.
+        if (!res.ok) return { status:'error', msg:`El servidor respondió HTTP ${res.status}.` };
         return leerJson(res);
       },
       // Las filas de la hoja "Control 2026" se calculan ACÁ con las mismas funciones
       // que usa la pantalla; el servidor no recalcula nada.
       buildExtra: (data) => {
-        const totalesTarjetas = calcularTotalesTarjetas(tarjetasRef.current, data.dolarTarjeta, desfaseTarjetas(data.ajustes));
-        const ctx = { monthly:data.monthly, gastosRecurrentes:data.gastosRecurrentes, totalesTarjetas,
-          uberDiDi:data.uberDiDi, zapiaData:zapiaRef.current, saldoJulieta:data.saldoJulieta, hoyStr:hoy(), ajustes:data.ajustes };
+        const ctx = { appData: data, zapiaData: zapiaRef.current, tarjetasData: tarjetasRef.current };
         return {
-          filasControl: calcularFilasControl(ctx, new Date().toLocaleString('es-AR')),
-          hojasExtra: calcularHojasExtra(data, zapiaRef.current),      // tablas legibles: Ganancias Auto, Saldos Uala, Conciliaciones, Ahorros
+          encabezadosControl: HEADERS_CONTROL,
+          filasControl: calcularFilasControl(ctx, new Date().toLocaleString('es-AR')),      // el MISMO resultado que ven Principal y Cierre
+          hojasExtra: calcularHojasExtra(data, zapiaRef.current, tarjetasRef.current, provRef.current, hoy()),
         };
       },
       onStatus: (s, msg) => {
@@ -138,7 +141,11 @@ export default function App() {
       const [r2, r3] = await Promise.all([ fetch(`${url}?tipo=zapia`), fetch(`${url}?tipo=tarjetas`) ]);
       const [d2, d3] = await Promise.all([ leerJson(r2), leerJson(r3) ]);
       if (d2.status==='ok' && d2.data) setZapiaData(d2.data);
-      if (d3.status==='ok' && d3.data) setTarjetasData(dedupePorId(d3.data));
+      if (d3.status==='ok' && d3.data) {
+        const filas = dedupePorId(d3.data);
+        setTarjetasData(filas.filter(m => !m.provisorio));
+        setTarjetasProv(filas.filter(m => m.provisorio));
+      }
     } catch(e) { console.error('Error cargando datos externos:', e); }
     setTarjetasLoading(false);
   }, []);
@@ -150,7 +157,8 @@ export default function App() {
     try {
       const d1 = await leerJson(await fetch(`${url}?tipo=appdata`));
       if (d1.status !== 'ok' || !d1.data) throw new Error(d1.msg || 'No se pudieron leer los datos.');
-      if (typeof d1.version !== 'number') throw new Error('El Apps Script todavía no está actualizado a la versión 6.');
+      if (typeof d1.version !== 'number') throw new Error('El Apps Script todavía no está actualizado (mínimo versión 6).');
+      try { const inf = await leerJson(await fetch(`${url}?tipo=info`)); setBackendInfo(inf.status === 'ok' && inf.backend ? String(inf.backend) : ''); } catch { setBackendInfo(''); }
       setAppData(engine.init({ version:d1.version, data:d1.data }));
       setLoadedOk(true);
       await cargarExternos(url);
@@ -253,7 +261,7 @@ export default function App() {
   ];
 
   const onRefresh = () => cargarExternos(scriptUrl);
-  const commonProps = { appData, saveData, zapiaData, tarjetasData, syncing, syncStatus, usuario, onRefresh, ocultar, onToggleOcultar:toggleOcultar };
+  const commonProps = { appData, saveData, zapiaData, tarjetasData, tarjetasProv, syncing, syncStatus, usuario, onRefresh, ocultar, onToggleOcultar:toggleOcultar };
 
   return (
     <div className="font-sans bg-paper min-h-screen pb-[70px]">
@@ -272,7 +280,7 @@ export default function App() {
       )}
 
       <div className={activeApp==='principal'?'block':'hidden'}>
-        <ControlGastos {...commonProps} metaAhorro={metaAhorro} syncMsg={syncMsg}
+        <ControlGastos {...commonProps} metaAhorro={metaAhorro} syncMsg={syncMsg} backendInfo={backendInfo}
           onRetry={retry} onOpenSettings={()=>setShowSettings(true)} onIrATarjeta={irATarjeta}/>
       </div>
       <div className={activeApp==='gastos'?'block':'hidden'}>

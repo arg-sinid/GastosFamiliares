@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
-import {
-  $$, n, fmtK, getKey, fmtKey, getMonday, weekDates, dateStr, fmtDate, monthOpts,
-  itemsDelMes, itemsDeLaSemana, agruparItems, calcularTotalesTarjetas, resolverMes, esCategoriaAuto, desfaseTarjetas, mesDesplazado, fechaVencimiento,
-} from '../utils.js';
+import { montoEnPesos, $$, n, fmtK, getKey, fmtKey, getMonday, weekDates, dateStr, fmtDate, monthOpts, itemsDelMes, itemsDeLaSemana, agruparItems, esCategoriaAuto, mesDesplazado } from '../utils.js';
+import { calcularTotalesTarjetas, resolverMes, desfaseTarjetas, fechaVencimiento } from '../motor.js';
 import {
   categorizarNuevos, emojiCorrectoParaCategoria, TIPOS_FINANCIEROS,
 } from '../categorias.js';
@@ -195,7 +193,7 @@ function HistorialTarjetas({ tarjetasData, dolarMap }) {
   );
 }
 
-export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onRefresh, onRefreshTarjetas, loadingTarjetas, nav }) {
+export default function Gastos({ zapiaData, tarjetasData, tarjetasProv, appData, saveData, onRefresh, onRefreshTarjetas, loadingTarjetas, nav }) {
   const today = new Date();
   const [tab,       setTab]       = useState('detalle');
   const [filtro,    setFiltro]    = useState('mes');
@@ -545,6 +543,30 @@ export default function Gastos({ zapiaData, tarjetasData, appData, saveData, onR
             </div>
           );
         })}
+        {(() => {
+          // Movimientos provisorios (cargados antes de que llegue el resumen): solo informativos. NO suman en ningún total
+          // y desaparecen cuando llega el resumen definitivo de esa tarjeta y mes.
+          const grupos = {};
+          (tarjetasProv || []).forEach(m => {
+            if (tarjetasData.some(d => d.tarjeta === m.tarjeta && d.mes === m.mes)) return;
+            const k = `${m.tarjeta}|${m.mes}`; const dolar = n(dolarMap[m.mes]) || 0;
+            grupos[k] = grupos[k] || { tarjeta: m.tarjeta, mes: m.mes, total: 0, cantidad: 0 };
+            grupos[k].total += montoEnPesos(m, dolar); grupos[k].cantidad += 1;
+          });
+          const lista = Object.values(grupos);
+          if (!lista.length) return null;
+          return (
+            <div className="bg-[#FFFAF0] border-[1.5px] border-[#F6AD55] rounded-2xl px-4 py-3 mb-3">
+              <div className="text-[12px] font-extrabold text-[#9C4221] mb-1">⏳ Movimientos provisorios (todavía sin resumen)</div>
+              {lista.map(x => (
+                <div key={x.tarjeta + x.mes} className="flex justify-between text-[12px] text-ink">
+                  <span>{x.tarjeta} · resumen de {fmtKey(x.mes).split(' ')[0]} · {x.cantidad} mov.</span><span className="font-bold tabular-nums">≈ {$$(x.total)}</span>
+                </div>
+              ))}
+              <div className="text-[10px] text-muted mt-1">Es una estimación: no suma en Gastos ni en el resultado y se reemplaza cuando llega el resumen definitivo.</div>
+            </div>
+          );
+        })()}
         <button onClick={repararIconos} disabled={reparando}
           className="w-full mt-1 py-2 border-[1.5px] border-border rounded-lg bg-white text-muted text-xs font-semibold touch-manipulation">{reparando ? '...' : '🔧 Reparar íconos de categorías'}</button>
       </>)}

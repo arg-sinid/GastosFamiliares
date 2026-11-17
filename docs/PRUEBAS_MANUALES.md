@@ -1,14 +1,28 @@
-# Pruebas manuales (dos celulares, red, PDF)
+# Pruebas manuales v7.0 (celular, dos dispositivos, red, PDF)
+Automáticas: `npm test` (motor, utilidades, sincronización y backend en sandbox).
 
-Automáticas: `npm test` (finanzas, sincronización, backend v6 en sandbox).
+**G — Navegación e interfaz**
+1. Tres accesos inferiores: Principal, Gastos, Auto. Sin botones extra.
+2. Principal → Mes: orden Disponibilidad → Ingresos familiares → Gastos fijos y obligaciones → Resultado → Ahorro. No hay listados diarios, ni control de efectivo, ni ingresos diarios de Uber/DiDi.
+3. Tocar "Germán · saldo de Uala" abre/cierra la conciliación (misma que en Control) y "Ver todo en Control ›" lleva a Control.
+4. Selector de mes: cambiar a un mes anterior y volver; los importes y obligaciones de cada mes no se mezclan. Historial muestra 🔒 en meses cerrados.
+5. Ahorros: cargar un ingreso y un retiro; el ahorro NO cambia la disponibilidad ni el resultado.
+6. Control: Uala (período declaración a declaración, declarar en cualquier fecha, editar/borrar saldos) y Efectivo familiar.
+7. Cierre: Cerrar mes → aparece la foto; cambiar un dato y ver el aviso de diferencia; Reabrir.
+8. 👁️ oculta importes en todas las pantallas.
 
-1. **Dos dispositivos**: en A cargar una ganancia (Auto); en B cargar el saldo de Julieta (Principal → Control). Sin refrescar, guardar en ambos. Resultado: los dos registros en los dos celulares tras volver a abrir.
-2. **Mismo registro**: cargar la misma ganancia en A y en B. Debe quedar una sola si tiene el mismo id (si son cargas distintas, quedan dos, que es lo correcto).
-3. **Sin red**: modo avión → cargar una ganancia → aparece "pendiente de sincronizar" y el botón rojo en Principal. Cerrar la app, abrirla con red: se envía sola. No debe decir "sincronizado" antes.
-4. **Respuesta perdida**: (difícil de forzar) cortar la red justo al guardar y reintentar: no debe duplicar.
-5. **Cambio de mes**: Principal → elegir mes anterior y volver: los datos no cambian; Control y Cierre siguen el mes elegido.
-6. **PDF**: importar dos veces el mismo resumen con Zapia → el total de la tarjeta no cambia (misma `id_unico`).
-7. **Auto**: categorizar un gasto como Mantenimiento desde Gastos → aparece una vez en Auto; combustible y peajes coinciden con Gastos del mismo mes.
-8. **Conciliación**: domingo con saldo igual al esperado (diferencia 0), uno con menos (hormiga) y uno con más (sobrante).
-9. **Depósito de fin de mes**: cargarlo el último día y declarar el saldo: la diferencia no debe inflarse.
-10. **Ocultar importes**: 👁️ en Principal → todos los importes de las 3 pantallas y gráficos se ocultan; se mantiene al reabrir.
+**Obligaciones**
+9. Fijo con 📅: aparece como pendiente; ✓ Pagado lo pasa a Pagadas; deshacer lo devuelve.
+10. Dejar pasar la fecha sin pagar: queda "Vencido" y el período siguiente aparece como "Estimado" sin ocultar lo vencido.
+11. Tarjeta: con resumen cargado figura "definitivo"; al cargar el del mes siguiente reemplaza al estimado (no se suma).
+12. Tocar "Tarjeta ICBC" lleva a Gastos → Tarjetas del resumen correcto.
+
+**Conciliaciones**
+13. Uala: declarar un saldo igual al esperado (diferencia 0), uno menor (negativa) y uno mayor (positiva).
+14. Efectivo: declarar el domingo en Auto y ver el período en Control.
+
+**Sincronización**
+15. Dos celulares: cargar datos distintos antes de sincronizar → quedan los dos.
+16. Modo avión: guardar → "pendiente"; con red se envía solo; nunca dice "sincronizado" antes.
+17. Importar dos veces el mismo PDF: el total de la tarjeta no cambia.
+18. Cartel de Apps Script: con la v6 aparece el aviso; tras pegar la v7 desaparece.

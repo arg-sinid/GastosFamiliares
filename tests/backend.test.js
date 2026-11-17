@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 
-const codigo = fs.readFileSync(new URL('../backend/apps_script_v6.js', import.meta.url), 'utf8');
+const codigo = fs.readFileSync(new URL('../backend/apps_script_v7.js', import.meta.url), 'utf8');
 
 function crearEntorno(hojasIniciales = {}) {
   const hojas = {};
@@ -156,4 +156,30 @@ test('v6.1: escribe las hojas legibles derivadas, descarta filas inválidas e ig
   // un segundo guardado reescribe sin dejar filas viejas
   post({ baseVersion:1, data:d, hojasExtra:{ 'Saldos Uala': { headers:['Fecha','Saldo real declarado'], rows:[ ['2026-11-08', 500000] ] } } });
   assert.equal(hojas['Saldos Uala'].celdas.get('2,1'), '2026-11-08');
+});
+
+test('v7.0: endpoint info, encabezados de Control enviados por la app y movimientos provisorios marcados', () => {
+  const rows = [['id_unico','mes','tarjeta','fecha','comercio','importe','moneda','cuotas','tipo_movimiento','archivo_origen'],
+    ['k1','2026-10','icbc','2026-10-03','YPF',1000,'ARS','','consumo','resumen.pdf'],
+    ['p1','2026-11','icbc','2026-11-03','SUPER',500,'ARS','','consumo','ultimos movimientos'],
+    ['p2','2026-11','bna','2026-11-04','CAFE',200,'ARS','','provisorio','']];
+  const { get, post, hojas } = crearEntorno({ Tarjetas: rows });
+  assert.equal(get('info').backend, '7.0');
+  assert.deepEqual(get('tarjetas').data.map(x => x.provisorio), [false, true, true]);
+  const dat = vacio(); dat.monthly['2026-10'] = {};
+  const enc = Array.from({length:15}, (_,i) => 'H' + i);
+  const r = post({ baseVersion:0, data:dat, filasControl:[fila(5)], encabezadosControl:enc });
+  assert.equal(r.status, 'ok'); assert.equal(r.controlOk, true);
+  assert.equal(hojas['Control 2026'].celdas.get('1,3'), 'H2');
+});
+
+test('v7.0: hojas derivadas nuevas (Efectivo y Obligaciones) se escriben', () => {
+  const { post, hojas } = crearEntorno();
+  const d = vacio(); d.monthly['2026-10'] = {};
+  const r = post({ baseVersion:0, data:d, hojasExtra:{
+    'Efectivo': { headers:['Desde','Hasta'], rows:[['2026-11-01','2026-11-08']] },
+    'Obligaciones': { headers:['Período','Gasto'], rows:[['2026-11','alquiler']] } } });
+  assert.equal(r.hojasOk, true);
+  assert.equal(hojas['Efectivo'].celdas.get('2,2'), '2026-11-08');
+  assert.equal(hojas['Obligaciones'].celdas.get('2,2'), 'alquiler');
 });

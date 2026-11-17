@@ -6,7 +6,7 @@
 // reintenta. Nunca se pisa un cambio ajeno con una copia vieja.
 import { normalizarAppData } from './utils.js';
 
-const MAP_FIELDS  = ['monthly','categories','gastosRecurrentes','saldoJulieta','dolarTarjeta','autoDetalle','vencimientos','gastoVehiculo','pagosFijos','ajustes','detalleFijos'];
+const MAP_FIELDS  = ['monthly','categories','gastosRecurrentes','saldoJulieta','dolarTarjeta','autoDetalle','vencimientos','gastoVehiculo','pagosFijos','ajustes','detalleFijos','cierres'];
 const LIST_FIELDS = { uberDiDi:'fecha', ahorroMovimientos:null, vehiculos:null }; // campo de orden desc (o null)
 
 const isPlain = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -112,6 +112,12 @@ export class SyncEngine {
       try { res = await this.post({ baseVersion: this.version, data: snapshot, extra: this.buildExtra(snapshot) }); }
       catch (e) { this._estado('error', 'Sin conexión: los cambios quedaron guardados en este dispositivo.'); return { ok:false, error:'network' }; }
 
+      // Solo es "guardado" si el servidor respondió explícitamente ok Y devolvió la versión nueva. Una respuesta
+      // incompleta (sin versión) no se toma como éxito: los cambios siguen pendientes.
+      if (res && res.status === 'ok' && typeof res.version !== 'number') {
+        this._estado('error', 'El servidor respondió incompleto: no se confirmó el guardado.');
+        return { ok:false, error:'incompleta' };
+      }
       if (res && res.status === 'ok') {
         this.version = res.version; this.base = snapshot;
         if (this.mine === snapshot) { this.pending = false; this._limpiar(); }

@@ -140,3 +140,33 @@ test('dos celulares agregan vehículos distintos y asignan gastos: quedan los do
   assert.deepEqual(out.gastoVehiculo, { g1:'B', g2:'C' });
   assert.deepEqual(Object.keys(out.vencimientos).sort(), ['bna','icbc']);
 });
+
+// ── Prueba F — sincronización: solo es éxito si el servidor responde ok y devuelve la versión ──
+test('F: una respuesta ok SIN versión no se informa como guardado y el cambio queda pendiente', async () => {
+  const estados = [], store = memStore();
+  const E = new SyncEngine({ post: async () => ({ status:'ok' }), store, onStatus:(s)=>estados.push(s) });
+  E.init({ version:1, data:data() });
+  const r = await E.save({ ...E.mine, categories:{ x:{ categoria:'Otros' } } });
+  assert.equal(r.ok, false); assert.ok(!estados.includes('ok')); assert.equal(E.hayPendiente, true); assert.equal(store.m.size, 1);
+});
+
+test('F: error del servidor y respuesta inválida tampoco son éxito; después se recupera sin duplicar', async () => {
+  const srv = fakeServer(data({ uberDiDi:[reg('a','2026-10-01')] }));
+  let modo = 'error';
+  const post = async (p) => modo === 'error' ? { status:'error', msg:'HTTP 500' } : modo === 'basura' ? {} : srv.post(p);
+  const E = new SyncEngine({ post });
+  E.init({ version:srv.version, data:srv.data });
+  assert.equal((await E.save({ ...E.mine, uberDiDi:[reg('n','2026-10-02'), ...E.mine.uberDiDi] })).ok, false);
+  modo = 'basura'; assert.equal((await E.flush()).ok, false);
+  modo = 'ok';     assert.equal((await E.flush()).ok, true);
+  assert.equal(srv.data.uberDiDi.filter(r => r.id === 'n').length, 1);
+});
+
+test('F: los cierres, obligaciones pagadas y ajustes se combinan entre dos celulares sin perder nada', () => {
+  const base = data({ cierres:{}, pagosFijos:{} });
+  const mine = data({ cierres:{ '2026-10': { fecha:'2026-11-02' } }, pagosFijos:{ '2026-11|alquiler': { fecha:'2026-11-05' } } });
+  const theirs = data({ cierres:{}, pagosFijos:{ '2026-11|icbc': { fecha:'2026-11-06' } }, ajustes:{ tarjetaDesfase:1 } });
+  const out = mergeAppData(base, mine, theirs);
+  assert.deepEqual(Object.keys(out.pagosFijos).sort(), ['2026-11|alquiler','2026-11|icbc']);
+  assert.ok(out.cierres['2026-10']); assert.equal(out.ajustes.tarjetaDesfase, 1);
+});
