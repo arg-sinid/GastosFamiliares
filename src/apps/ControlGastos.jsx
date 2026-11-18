@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
 import { n, $$, fmtK, getKey, fmtKey, monthOpts, hoy, uid, fmtDate, mesDesplazado } from '../utils.js';
 import {
-  VENCIMIENTO_MES_SIGUIENTE_DEFECTO, desfaseTarjetas, fechaVencimiento, clavesFijos, esTarjetaClave, totalFijos,
+  VENCIMIENTO_MES_SIGUIENTE_DEFECTO, fechaVencimiento, clavesFijos, esTarjetaClave, totalFijos,
   construirSituacion, calcularResultadoMensual, calcularAhorroManual,
 } from '../motor.js';
 import { MoneyInput, CategoriaModal } from '../components/ui.jsx';
@@ -108,7 +108,10 @@ const ESTADOS = {
 // Una obligación: gasto fijo + período + vencimiento + estado. Solo muestra lo que calculó el motor.
 function ObligacionRow({ o, etiquetas, onPagar, onDeshacer, onAbrir }) {
   const e = ESTADOS[o.estado], provisorio = o.tipo === 'provisorio';
-  const fuente = o.fuente === 'movimientos' ? 'según movimientos provisorios' : o.fuente === 'recurrente' ? 'importe recurrente' : 'según el resumen anterior';
+  const mn = k => fmtKey(k).split(' ')[0].toLowerCase();
+  const insignia = o.fuente === 'movimientos' ? `Temporal de ${mn(o.mesResumen)}`
+    : o.fuente === 'recurrente' ? 'Estimado · importe recurrente'
+    : `Estimado${o.basadoEn ? ` · basado en el resumen de ${mn(o.basadoEn)}` : ''}`;
   const puedePagar = !o.pagado && (!provisorio || o.estado === 'vencido');
   return (
     <div className="flex items-center gap-2 px-4 py-2.5 border-t border-border-soft bg-white">
@@ -118,10 +121,10 @@ function ObligacionRow({ o, etiquetas, onPagar, onDeshacer, onAbrir }) {
         </button>
         <div className="flex gap-1.5 flex-wrap mt-0.5 items-center">
           <span className={`text-[10px] font-bold rounded px-1.5 py-0.5 ${e.cls}`}>{e.txt}</span>
-          {provisorio && <span className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-[#FEEBC8] text-[#9C4221]">Estimado · {fuente}</span>}
+          {provisorio && <span className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-[#FEEBC8] text-[#9C4221]">{insignia}</span>}
           <span className="text-[10px] text-muted-light">
-            {o.pagado ? `pagado ${fmtDate(new Date((o.fechaPago || o.fecha) + 'T12:00:00'))}` : `vence ${fmtDate(new Date(o.fecha + 'T12:00:00'))}`}
-            {o.mesResumen ? ` · resumen de ${fmtKey(o.mesResumen).split(' ')[0]}` : ` · de ${fmtKey(o.periodo).split(' ')[0]}`}
+            {o.pagado ? `pagado ${fmtDate(new Date((o.fechaPago || o.fecha) + 'T12:00:00'))}` : `vence ${fmtDate(new Date(o.fecha + 'T12:00:00'))}/${o.fecha.slice(0,4)}`}
+            {` · período: ${o.mesResumen ? 'resumen de ' : ''}${fmtKey(o.mesResumen || o.periodo)}`}
           </span>
         </div>
       </div>
@@ -221,6 +224,8 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
   const [nuevoFijo, setNuevoFijo] = useState(null);
   const [verUala, setVerUala] = useState(false);
   const [verPagadas, setVerPagadas] = useState(false);
+  const [verCob, setVerCob] = useState(true);
+  const [verVencAnt, setVerVencAnt] = useState(false);
   const [editarImportes, setEditarImportes] = useState(false);
 
   const allData = appData.monthly || {};
@@ -231,9 +236,7 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
   const ahorroMovimientos = appData.ahorroMovimientos || [];
   const ajustes = appData.ajustes || {};
   const claves = clavesFijos(ajustes);
-  const desfase = desfaseTarjetas(ajustes);
-  const mesResumen = mesDesplazado(selKey, -desfase);
-  const cambiarDesfase = (v) => saveData({ ...appData, ajustes: { ...ajustes, tarjetaDesfase: Number(v) } });
+  const mesResumen = selKey;       // el resumen de un mes (gastos de noviembre) figura en el Principal de ese mes y vence el siguiente
 
   // ÚNICA fuente de cálculo: el motor financiero. Los importes que se están editando (sin guardar) se reflejan en todo.
   const appCalc = edit && edit.key === selKey ? { ...appData, monthly: { ...allData, [selKey]: edit.data } } : appData;
@@ -253,7 +256,7 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
   const marcarPago = (o) => saveData({ ...appData, pagosFijos: { ...pagosFijos, [o.id]: { fecha: hoyStr } } });
   const deshacerPago = (o) => { const nx = { ...pagosFijos }; delete nx[o.id]; return saveData({ ...appData, pagosFijos: nx }); };
   const abrirObligacion = (o) => {
-    if (esTarjetaClave(o.key)) onIrATarjeta?.(o.key.toUpperCase(), o.mesResumen || mesResumen);
+    if (esTarjetaClave(o.key)) onIrATarjeta?.(o.key.toUpperCase(), o.mesResumen || o.periodo);
     else { if (o.periodo !== selKey) setSelKey(o.periodo); setDetalleFijo(o.key); }
   };
   const guardarVenc = async (key, v) => { await saveData({ ...appData, vencimientos: { ...vencimientos, [key]: v } }); setEditVenc(null); };
@@ -384,13 +387,62 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
               <div className="bg-white/10 rounded-lg px-3 py-2"><div className="text-[10px] opacity-80">Saldo real en Uala{disp.uala ? ` · ${fmtDate(new Date(disp.uala.fecha+'T12:00:00'))}` : ''}</div><div className="text-[16px] font-extrabold tabular-nums">{disp.uala ? $$(disp.uala.valor) : '—'}</div></div>
               <div className="bg-white/10 rounded-lg px-3 py-2"><div className="text-[10px] opacity-80">Efectivo real{disp.efectivo ? ` · ${fmtDate(new Date(disp.efectivo.fecha+'T12:00:00'))}` : ''}</div><div className="text-[16px] font-extrabold tabular-nums">{disp.efectivo ? $$(disp.efectivo.valor) : '—'}</div></div>
             </div>
-            {esMesActual && (ob.totales.aPagar > 0) && (
-              <div className={`mt-3 rounded-lg px-3 py-2 text-[12px] font-bold ${cobertura.alcanza ? 'bg-positive/30' : 'bg-negative/40'}`}>
-                {cobertura.alcanza ? `✓ Alcanza para lo vencido y pendiente (${$$(cobertura.aPagar)}): sobran ${$$(cobertura.balance)}` : `⚠️ Para lo vencido y pendiente (${$$(cobertura.aPagar)}) faltan ${$$(Math.abs(cobertura.balance))}`}
-              </div>
-            )}
-            <div className="text-[10px] opacity-70 mt-2 leading-relaxed">Es plata real declarada, no ganancia. No incluye el sueldo pendiente de cobro ni lo estimado.</div>
+            <div className="text-[10px] opacity-70 mt-2 leading-relaxed">Es plata real declarada, no ganancia. No incluye el sueldo previsto ni lo estimado.</div>
           </div>
+
+          {/* A2. Cobertura del mes siguiente: solo lo que vence ese mes, restando disponibilidad real y sueldo previsto */}
+          {esMesActual && (() => {
+            const c = cobertura, mn = k => fmtKey(k).split(' ')[0].toLowerCase(), sp = c.sueldoPrevisto;
+            const Fila = ({ signo, label, sub, valor, cls }) => (
+              <div className="flex justify-between items-start gap-3 px-4 py-2 border-t border-border-soft">
+                <div className="min-w-0">
+                  <div className="text-[13px] text-ink font-semibold">{signo ? <span className="text-muted-light mr-1">{signo}</span> : null}{label}</div>
+                  {sub && <div className="text-[11px] text-muted-light leading-snug">{sub}</div>}
+                </div>
+                <span className={`text-[13px] font-bold tabular-nums shrink-0 ${cls || 'text-ink'}`}>{valor}</span>
+              </div>
+            );
+            return (
+              <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
+                <div className="bg-tab-principal text-white px-4 py-2.5 font-bold text-[13px] flex justify-between">
+                  <span>🧭 Cobertura de {mn(c.mes)}</span><span className="text-[11px] opacity-80 font-normal">solo lo que vence en {mn(c.mes)}</span>
+                </div>
+                <Fila label={`Obligaciones de ${mn(c.mes)}`} valor={$$(c.obligaciones.total)}
+                  sub={[c.obligaciones.definitivo > 0 && `definitivas ${$$(c.obligaciones.definitivo)}`, c.obligaciones.temporal > 0 && `temporales ${$$(c.obligaciones.temporal)}`, c.obligaciones.estimado > 0 && `estimadas ${$$(c.obligaciones.estimado)}`].filter(Boolean).join(' · ') || 'No hay obligaciones cargadas para ese mes'}/>
+                <Fila signo="−" label="Disponibilidad real" valor={$$(c.disponible)} cls="text-positive"
+                  sub={`Uala ${disp.uala ? $$(disp.uala.valor) : '—'} + efectivo ${disp.efectivo ? $$(disp.efectivo.valor) : '—'} (declarados)`}/>
+                <Fila signo="−" label={`Sueldo previsto de Julieta (${mn(sp.mesSueldo)})`} valor={sp.monto > 0 ? $$(sp.monto) : '—'} cls="text-muted"
+                  sub={sp.estado === 'cobrado' ? `Se cobró el ${fmtDate(new Date(sp.fechaCobro+'T12:00:00'))}; va a la cuenta ICBC, no está en la disponibilidad` : `Todavía no cobrado: se cobra el ${fmtDate(new Date(sp.fechaCobro+'T12:00:00'))}. No es dinero disponible hoy`}/>
+                <div className={`flex justify-between items-center px-4 py-3 border-t-2 ${c.alcanza ? 'bg-positive-soft border-[#9AE6B4]' : 'bg-negative-soft border-[#F5B4A8]'}`}>
+                  <span className={`text-[13px] font-extrabold ${c.alcanza ? 'text-positive' : 'text-negative'}`}>{c.alcanza ? '✓ Alcanza · sobrarían' : '⚠️ Faltarían'}</span>
+                  <span className={`text-xl font-extrabold tabular-nums ${c.alcanza ? 'text-positive' : 'text-negative'}`}>{$$(c.alcanza ? c.balance : c.falta)}</span>
+                </div>
+                {c.items.length > 0 && (
+                  <>
+                    <button onClick={() => setVerCob(v => !v)} className="w-full px-4 py-2 border-none border-t border-border-soft bg-paper text-[11px] font-bold text-muted text-left cursor-pointer touch-manipulation">
+                      {verCob ? '▲' : '▼'} Qué vence en {mn(c.mes)} ({c.items.length})
+                    </button>
+                    {verCob && c.items.map(o => <ObligacionRow key={o.id} o={o} etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>)}
+                  </>
+                )}
+                <div className="px-4 py-2 text-[10px] text-muted-light bg-paper border-t border-border-soft leading-relaxed">No incluye meses posteriores ni lo vencido de meses anteriores. Lo temporal y lo estimado se reemplazan por el resumen definitivo cuando llega.</div>
+              </div>
+            );
+          })()}
+
+          {/* A3. Vencidas e impagas de meses anteriores: bloque aparte, no entra en la cobertura */}
+          {esMesActual && ob.vencidasAnteriores.length > 0 && (
+            <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm border-[1.5px] border-[#F5B4A8]">
+              <button onClick={() => setVerVencAnt(v => !v)} className="w-full flex justify-between items-center gap-3 px-4 py-3 border-none bg-negative-soft cursor-pointer text-left touch-manipulation">
+                <div>
+                  <div className="text-[13px] font-extrabold text-negative">⚠️ Vencidas de meses anteriores {verVencAnt ? '▲' : '▼'}</div>
+                  <div className="text-[11px] text-negative/80">{ob.vencidasAnteriores.length} impaga{ob.vencidasAnteriores.length > 1 ? 's' : ''} · tocá para ver cuáles son</div>
+                </div>
+                <span className="text-xl font-extrabold tabular-nums text-negative">{$$(ob.totales.vencidoAnterior)}</span>
+              </button>
+              {verVencAnt && ob.vencidasAnteriores.map(o => <ObligacionRow key={o.id} o={o} etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>)}
+            </div>
+          )}
 
           {/* B. Ingresos familiares */}
           <div className="bg-white rounded-2xl overflow-hidden mb-3.5 shadow-sm">
@@ -428,10 +480,9 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
             </div>
             {esMesActual ? (
               <>
-                <SeccionObligaciones titulo="Vencidas impagas" color="text-negative" lista={ob.vencidas} total={ob.totales.vencido} etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>
-                <SeccionObligaciones titulo="Pendientes actuales" color="text-ink" lista={ob.pendientes} total={ob.totales.pendiente} etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>
-                <SeccionObligaciones titulo="Próximos compromisos (estimados)" color="text-muted" lista={ob.estimados} total={ob.totales.estimado} nota="Estimados: no cuentan en el resultado ni en lo que hay que pagar hoy. Se reemplazan por el importe definitivo cuando llega." etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>
-                {ob.vencidas.length + ob.pendientes.length + ob.estimados.length === 0 && (
+                <SeccionObligaciones titulo={`Vencen en ${fmtKey(currentKey).split(' ')[0].toLowerCase()}`} color="text-ink" lista={ob.delMes} total={ob.totales.delMes} nota="Incluye lo vencido este mes que sigue impago. Lo de meses anteriores está en su bloque aparte y lo del mes siguiente, en la cobertura." etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>
+                <SeccionObligaciones titulo="Más adelante (fuera de la cobertura)" color="text-muted" lista={ob.masAdelante} total={ob.totales.masAdelante} nota="Meses posteriores al siguiente: no cuentan en la cobertura ni en el resultado." etiquetas={etiquetas} onPagar={marcarPago} onDeshacer={deshacerPago} onAbrir={abrirObligacion}/>
+                {ob.delMes.length + ob.masAdelante.length + ob.delMesSiguiente.length + ob.vencidasAnteriores.length === 0 && (
                   <div className="px-4 py-3 text-[12px] text-muted-light">No hay obligaciones con vencimiento cargado. Poné la fecha (📅) en "Editar importes y vencimientos".</div>
                 )}
               </>
@@ -486,13 +537,8 @@ export default function ControlGastos({ appData, saveData, zapiaData, tarjetasDa
             <div className="bg-negative text-white px-4 py-2.5 font-bold text-[13px] flex justify-between">
               <span>📤 Gastos fijos</span><span className="text-[11px] opacity-80 font-normal">tocá uno para ver su detalle</span>
             </div>
-            <div className="px-4 py-2 bg-[#EBF8FF] border-b border-[#BEE3F8] text-[11px] text-tab-tarjetas flex items-center gap-2 flex-wrap">
-              <span>💳 En {fmtKey(selKey)} se pagan los resúmenes de</span>
-              <select value={desfase} onChange={e=>cambiarDesfase(e.target.value)}
-                className="border-[1.5px] border-[#90CDF4] rounded-md bg-white text-tab-tarjetas font-bold text-[11px] px-1.5 py-1">
-                <option value={1}>el mes anterior ({fmtKey(mesDesplazado(selKey,-1)).split(' ')[0]})</option>
-                <option value={0}>el mismo mes ({fmtKey(selKey).split(' ')[0]})</option>
-              </select>
+            <div className="px-4 py-2 bg-[#EBF8FF] border-b border-[#BEE3F8] text-[11px] text-tab-tarjetas">
+              💳 Las tarjetas de {fmtKey(selKey)} son los gastos de ese mes: se pagan el mes siguiente.
             </div>
             {filasFijos.map((g) => {
               const isRec  = recurrentes[g.key] !== undefined;

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { montoEnPesos, $$, n, fmtK, getKey, fmtKey, getMonday, weekDates, dateStr, fmtDate, monthOpts, itemsDelMes, itemsDeLaSemana, agruparItems, esCategoriaAuto, mesDesplazado } from '../utils.js';
-import { calcularTotalesTarjetas, resolverMes, desfaseTarjetas, fechaVencimiento } from '../motor.js';
+import { montoEnPesos, $$, n, fmtK, getKey, fmtKey, getMonday, weekDates, dateStr, fmtDate, monthOpts, itemsDelMes, itemsDeLaSemana, agruparItems, itemsDeTarjetas, esCategoriaAuto } from '../utils.js';
+import { calcularTotalesTarjetas, resolverMes, fechaVencimiento } from '../motor.js';
 import {
   categorizarNuevos, emojiCorrectoParaCategoria, TIPOS_FINANCIEROS,
 } from '../categorias.js';
@@ -13,6 +13,8 @@ const TARJETAS_CONFIG = {
   BNA:  { nombre:'Tarjeta Banco Nación', color:'#2B6CB0', icon:'💳' },
 };
 const fmtFechaCorta = f => f.split('-').reverse().join('/');
+const mesNombre = k => fmtKey(k).split(' ')[0].toLowerCase();
+const InsigniaProv = () => <span className="text-[10px] bg-[#FEEBC8] text-[#9C4221] rounded px-1.5 py-0.5 font-bold">provisorio</span>;
 
 function EditCatModal({ categorias, onSave, onClose }) {
   const cats = {};
@@ -60,8 +62,9 @@ function EditCatModal({ categorias, onSave, onClose }) {
 }
 
 // Detalle de una tarjeta en un mes: consumos por categoría, cuotas y pagos/impuestos/intereses.
-function DetalleTarjeta({ items, config, categorias, onEditar, onBack }) {
+function DetalleTarjeta({ items, config, categorias, onEditar, onBack, provisorio = false, mes }) {
   const [expanded, setExpanded] = useState({});
+  const abierta = cat => provisorio ? expanded[cat] !== false : !!expanded[cat];   // provisorios: abiertos por defecto, para ver cada movimiento
   const cuotas      = items.filter(m => m.cuotas && m.cuotas.trim() !== '');
   const financieros = items.filter(m => (!m.cuotas || m.cuotas.trim()==='') && TIPOS_FINANCIEROS.includes(m.tipoMovimiento));
   const consumos    = items.filter(m => (!m.cuotas || m.cuotas.trim()==='') && !TIPOS_FINANCIEROS.includes(m.tipoMovimiento));
@@ -73,11 +76,16 @@ function DetalleTarjeta({ items, config, categorias, onEditar, onBack }) {
     <div className="max-w-[480px] mx-auto p-4 bg-paper min-h-[calc(100vh-70px)]">
       <button onClick={onBack} className="border-none bg-border-soft rounded-lg cursor-pointer px-4 py-2 font-bold text-muted mb-4 touch-manipulation">‹ Volver</button>
       <div className="rounded-2xl px-5 py-4.5 mb-4.5 text-white shadow-md" style={{background:config.color}}>
-        <div className="text-xl font-extrabold">{config.icon} {config.nombre}</div>
-        <div className="text-[32px] font-extrabold mt-2.5 tracking-tight tabular-nums">{$$(totalGeneral)}</div>
+        <div className="text-xl font-extrabold">{config.icon} {config.nombre}{provisorio && mes ? ` · temporal de ${mesNombre(mes)}` : ''}</div>
+        <div className="text-[32px] font-extrabold mt-2.5 tracking-tight tabular-nums">{provisorio ? '≈ ' : ''}{$$(totalGeneral)}</div>
         <div className="text-[11px] opacity-80 mt-1">{consumos.length} consumos · {cuotas.length} en cuotas · {financieros.length} otros</div>
       </div>
 
+      {provisorio && (
+        <div className="bg-[#FFFAF0] border-[1.5px] border-[#F6AD55] rounded-2xl px-4 py-3 mb-3.5 text-[12px] text-[#9C4221] leading-relaxed">
+          <strong>⏳ Movimientos provisorios.</strong> Todavía no llegó el resumen definitivo{mes ? ` de ${mesNombre(mes)}` : ''}: estos movimientos son temporales, no suman en Gastos ni en el resultado y se reemplazan (sin duplicarse) cuando llega el resumen.
+        </div>
+      )}
       <div className="bg-white rounded-2xl px-4 py-3.5 mb-3.5 shadow-sm">
         <div className="flex justify-between py-1.5"><span className="text-[13px] text-muted">Consumos categorizables</span><span className="text-sm font-bold text-ink tabular-nums">{$$(sum(consumos))}</span></div>
         {cuotas.length > 0 && <div className="flex justify-between py-1.5 border-t border-border-soft"><span className="text-[13px] text-muted">Cuotas</span><span className="text-sm font-bold text-tab-cierre tabular-nums">{$$(sum(cuotas))}</span></div>}
@@ -90,7 +98,7 @@ function DetalleTarjeta({ items, config, categorias, onEditar, onBack }) {
           {cuotas.map((m,i) => (
             <div key={m.id} className={`flex items-center px-3.5 py-2.5 ${i<cuotas.length-1?'border-b border-border-soft':''}`}>
               <div className="flex-1">
-                <div className="text-xs text-ink">{m.key} <span className="text-[10px] bg-accent-soft text-accent-strong rounded px-1.5 py-0.5 font-bold">{m.cuotas}</span></div>
+                <div className="text-xs text-ink">{m.key} <span className="text-[10px] bg-accent-soft text-accent-strong rounded px-1.5 py-0.5 font-bold">{m.cuotas}</span> {provisorio && <InsigniaProv/>}</div>
                 <div className="text-[11px] text-muted-light">{fmtFechaCorta(m.fecha)}{m.moneda==='USD'&&<span className="text-tab-tarjetas ml-1.5">USD {m.importe.toFixed(2)}</span>}</div>
               </div>
               <span className="font-bold text-[13px] text-tab-cierre tabular-nums">{$$(m.monto)}</span>
@@ -104,20 +112,21 @@ function DetalleTarjeta({ items, config, categorias, onEditar, onBack }) {
           <div className="text-white px-4 py-2.5 font-bold text-[13px]" style={{background:config.color}}>Consumos por categoría</div>
           {grupos.map(([cat,data]) => (
             <div key={cat}>
-              <div onClick={()=>setExpanded(p=>({...p,[cat]:!p[cat]}))}
-                className={`flex items-center px-3.5 py-3 border-b border-border-soft cursor-pointer touch-manipulation ${expanded[cat]?'bg-[#FAFAFA]':'bg-white'}`}>
+              <div onClick={()=>setExpanded(p=>({...p,[cat]:!abierta(cat)}))}
+                className={`flex items-center px-3.5 py-3 border-b border-border-soft cursor-pointer touch-manipulation ${abierta(cat)?'bg-[#FAFAFA]':'bg-white'}`}>
                 <span className="text-xl mr-2.5">{data.emoji}</span>
                 <span className="flex-1 text-[13px] font-bold text-ink">{cat}</span>
                 <span className="text-[11px] text-muted-light mr-2.5">{data.items.length}</span>
                 <span className="font-extrabold text-sm mr-2 tabular-nums" style={{color:config.color}}>{$$(data.total)}</span>
-                <span className="text-muted-light text-xs">{expanded[cat]?'▲':'▼'}</span>
+                <span className="text-muted-light text-xs">{abierta(cat)?'▲':'▼'}</span>
               </div>
-              {expanded[cat] && data.items.map(m => (
+              {abierta(cat) && data.items.map(m => (
                 <div key={m.id} className="flex items-center pl-11 pr-3.5 py-2.5 border-b border-border-soft bg-[#FAFAFA]">
                   <div className="flex-1">
                     <div className="text-xs text-ink">{m.key}</div>
                     <div className="text-[11px] text-muted-light flex gap-2 items-center">
                       <span>{fmtFechaCorta(m.fecha)}</span>
+                      {provisorio && <InsigniaProv/>}
                       {m.moneda==='USD'&&<span className="text-tab-tarjetas">USD {m.importe.toFixed(2)}</span>}
                       <button onClick={()=>onEditar(m)} className="border-none bg-border-soft rounded-md cursor-pointer text-[10px] text-muted px-1.5 py-0.5 touch-manipulation">✏️</button>
                     </div>
@@ -135,7 +144,7 @@ function DetalleTarjeta({ items, config, categorias, onEditar, onBack }) {
           <div className="bg-tab-gastos text-white px-4 py-2.5 font-bold text-[13px]">💰 Pagos / Impuestos / Intereses</div>
           {financieros.map((m,i) => (
             <div key={m.id} className={`flex items-center px-3.5 py-2.5 ${i<financieros.length-1?'border-b border-border-soft':''}`}>
-              <div className="flex-1"><div className="text-xs text-ink">{m.key}</div><div className="text-[11px] text-muted-light">{fmtFechaCorta(m.fecha)} · {m.tipoMovimiento}</div></div>
+              <div className="flex-1"><div className="text-xs text-ink">{m.key}</div><div className="text-[11px] text-muted-light flex gap-2 items-center"><span>{fmtFechaCorta(m.fecha)} · {m.tipoMovimiento}</span>{provisorio && <InsigniaProv/>}</div></div>
               <span className="font-bold text-[13px] text-tab-gastos tabular-nums">{$$(m.monto)}</span>
             </div>
           ))}
@@ -249,7 +258,7 @@ export default function Gastos({ zapiaData, tarjetasData, tarjetasProv, appData,
   const sortedGrupos = Object.entries(agruparItems(items, categories)).sort((a,b)=>b[1].total-a[1].total);
 
   // Fijos del Principal: solo lectura acá (se editan en Principal).
-  const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, dolarMap, desfaseTarjetas(appData.ajustes));
+  const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, dolarMap);
   const fijos = resolverMes(appData.monthly || {}, appData.gastosRecurrentes || {}, totalesTarjetas, selMes, appData.ajustes).gastos;
   const FIJOS = [['prestamos','🏦 Préstamos'],['nicolas','👤 Nicolás'],['segundo','👤 Segundo'],['alquiler','🏠 Alquiler'],
     ...((appData.ajustes?.fijosExtra) || []).map(e => [e.id, `${e.icon || '📌'} ${e.label}`])].filter(([k]) => n(fijos[k]) > 0);
@@ -311,11 +320,24 @@ export default function Gastos({ zapiaData, tarjetasData, tarjetasProv, appData,
     </>
   );
 
+  // Movimientos de una tarjeta en el mes: los del resumen definitivo; si todavía no llegó, los provisorios (temporales).
+  // Cuando existe el definitivo, los provisorios NO se muestran (no se duplican movimientos ni importes).
+  const movsTarjeta = (key) => {
+    const def = itemsDelMes([], tarjetasData, dolarMap, selMes).filter(m => m.tarjeta === key);
+    if (def.length > 0) return { movs: def, provisorio: false };
+    const prov = itemsDeTarjetas(tarjetasProv || [], dolarMap, m => m.mes === selMes && m.tarjeta === key);
+    return { movs: prov, provisorio: prov.length > 0 };
+  };
+  const venceTarjeta = (key) => {
+    const v = (appData.vencimientos || {})[key.toLowerCase()];
+    return v && n(v.dia) ? fechaVencimiento(selMes, v.dia, v.mesSiguiente !== false) : null;      // el resumen de un mes vence el mes siguiente
+  };
+
   // Detalle de una tarjeta (pantalla completa dentro de Gastos)
   if (selTarjeta) {
-    const movs = itemsDelMes([], tarjetasData, dolarMap, selMes).filter(m => m.tarjeta === selTarjeta);
+    const { movs, provisorio } = movsTarjeta(selTarjeta);
     return <>
-      <DetalleTarjeta items={movs} config={TARJETAS_CONFIG[selTarjeta]} categorias={categories}
+      <DetalleTarjeta items={movs} config={TARJETAS_CONFIG[selTarjeta]} categorias={categories} provisorio={provisorio} mes={selMes}
         onEditar={m => pedirCategoria([m.key], `"${m.key}"`, [m.id])} onBack={()=>setSelTarjeta(null)}/>
       {modales}
     </>;
@@ -505,7 +527,7 @@ export default function Gastos({ zapiaData, tarjetasData, tarjetasProv, appData,
           </div>
         ))}
 
-        {!loadingTarjetas && !tarjetasData.some(m => m.mes === selMes) && (
+        {!loadingTarjetas && !tarjetasData.some(m => m.mes === selMes) && !(tarjetasProv || []).some(m => m.mes === selMes) && (
           <div className="text-center px-5 py-12.5 text-muted-light">
             <div className="text-6xl mb-4">📎</div>
             <div className="text-base font-bold text-muted mb-2">Sin resúmenes este mes</div>
@@ -514,59 +536,33 @@ export default function Gastos({ zapiaData, tarjetasData, tarjetasProv, appData,
         )}
 
         {!loadingTarjetas && Object.entries(TARJETAS_CONFIG).map(([key, config]) => {
-          const movs = itemsDelMes([], tarjetasData, dolarMap, selMes).filter(m => m.tarjeta === key);
+          const { movs, provisorio } = movsTarjeta(key);
           if (movs.length === 0) return null;
           const cuotas = movs.filter(m => m.cuotas && m.cuotas.trim() !== '');
           const financ = movs.filter(m => (!m.cuotas || m.cuotas.trim()==='') && TIPOS_FINANCIEROS.includes(m.tipoMovimiento));
           const consumos = movs.filter(m => (!m.cuotas || m.cuotas.trim()==='') && !TIPOS_FINANCIEROS.includes(m.tipoMovimiento));
           const sum = a => a.reduce((s,m)=>s+m.monto,0);
+          const vence = venceTarjeta(key);
           return (
-            <div key={key} onClick={()=>setSelTarjeta(key)} className="bg-white rounded-2xl overflow-hidden mb-3 cursor-pointer shadow-sm touch-manipulation">
+            <div key={key} onClick={()=>setSelTarjeta(key)} className={`bg-white rounded-2xl overflow-hidden mb-3 cursor-pointer shadow-sm touch-manipulation ${provisorio ? 'border-[1.5px] border-[#F6AD55]' : ''}`}>
               <div className="text-white px-4 py-3 flex justify-between items-center" style={{background:config.color}}>
-                <span className="font-bold text-sm">{config.icon} {config.nombre}</span><span className="text-xs opacity-80">›</span>
+                <span className="font-bold text-sm">{config.icon} {config.nombre}</span><span className="text-xs opacity-80">{provisorio ? `Temporal de ${mesNombre(selMes)} ›` : '›'}</span>
               </div>
               <div className="px-4 py-3.5">
-                <div className="text-[10px] text-muted-light uppercase font-bold tracking-wide">Total del resumen</div>
-                <div className="text-[26px] font-extrabold text-ink tracking-tight mb-2.5 tabular-nums">{$$(sum(movs))}</div>
-                {(() => {
-                  const mesPrincipal = mesDesplazado(selMes, desfaseTarjetas(appData.ajustes));
-                  const v = (appData.vencimientos || {})[key.toLowerCase()];
-                  const vence = v && n(v.dia) ? fechaVencimiento(mesPrincipal, v.dia, !!v.mesSiguiente) : null;
-                  return <div className="text-[11px] text-tab-tarjetas font-semibold mb-2">🗓️ Entra en el Principal de {fmtKey(mesPrincipal).split(' ')[0]}{vence ? ` · vence ${vence.split('-').reverse().slice(0,2).join('/')}` : ''}</div>;
-                })()}
+                <div className="text-[10px] text-muted-light uppercase font-bold tracking-wide">{provisorio ? `Temporal de ${mesNombre(selMes)} · provisorio` : 'Total del resumen'}</div>
+                <div className="text-[26px] font-extrabold text-ink tracking-tight mb-2.5 tabular-nums">{provisorio ? '≈ ' : ''}{$$(sum(movs))}</div>
+                {vence && <div className="text-[11px] text-tab-tarjetas font-semibold mb-2">🗓️ Vence {vence.split('-').reverse().slice(0,2).join('/')} · son los gastos de {mesNombre(selMes)}</div>}
+                {provisorio && <div className="text-[11px] text-[#9C4221] mb-2 leading-snug">⏳ Provisorio: todavía no llegó el resumen definitivo. No suma en Gastos ni en el resultado y se reemplaza cuando llega.</div>}
                 <div className="flex gap-2.5 text-[11px] text-muted flex-wrap">
                   <span>🛍️ Consumos {$$(sum(consumos))}</span>
                   {cuotas.length>0 && <span>🧾 Cuotas {$$(sum(cuotas))}</span>}
                   {financ.length>0 && <span>💰 Otros {financ.length}</span>}
+                  <span>{movs.length} mov.</span>
                 </div>
               </div>
             </div>
           );
         })}
-        {(() => {
-          // Movimientos provisorios (cargados antes de que llegue el resumen): solo informativos. NO suman en ningún total
-          // y desaparecen cuando llega el resumen definitivo de esa tarjeta y mes.
-          const grupos = {};
-          (tarjetasProv || []).forEach(m => {
-            if (tarjetasData.some(d => d.tarjeta === m.tarjeta && d.mes === m.mes)) return;
-            const k = `${m.tarjeta}|${m.mes}`; const dolar = n(dolarMap[m.mes]) || 0;
-            grupos[k] = grupos[k] || { tarjeta: m.tarjeta, mes: m.mes, total: 0, cantidad: 0 };
-            grupos[k].total += montoEnPesos(m, dolar); grupos[k].cantidad += 1;
-          });
-          const lista = Object.values(grupos);
-          if (!lista.length) return null;
-          return (
-            <div className="bg-[#FFFAF0] border-[1.5px] border-[#F6AD55] rounded-2xl px-4 py-3 mb-3">
-              <div className="text-[12px] font-extrabold text-[#9C4221] mb-1">⏳ Movimientos provisorios (todavía sin resumen)</div>
-              {lista.map(x => (
-                <div key={x.tarjeta + x.mes} className="flex justify-between text-[12px] text-ink">
-                  <span>{x.tarjeta} · resumen de {fmtKey(x.mes).split(' ')[0]} · {x.cantidad} mov.</span><span className="font-bold tabular-nums">≈ {$$(x.total)}</span>
-                </div>
-              ))}
-              <div className="text-[10px] text-muted mt-1">Es una estimación: no suma en Gastos ni en el resultado y se reemplaza cuando llega el resumen definitivo.</div>
-            </div>
-          );
-        })()}
         <button onClick={repararIconos} disabled={reparando}
           className="w-full mt-1 py-2 border-[1.5px] border-border rounded-lg bg-white text-muted text-xs font-semibold touch-manipulation">{reparando ? '...' : '🔧 Reparar íconos de categorías'}</button>
       </>)}

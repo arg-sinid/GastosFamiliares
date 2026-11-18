@@ -25,13 +25,11 @@ export const esTarjetaClave = k => k === 'icbc' || k === 'bna';
 // Claves de los fijos: los de siempre + los agregados a mano (ajustes.fijosExtra).
 export const clavesFijos = (ajustes) => [...GASTOS_FIJOS_KEYS, ...(((ajustes && ajustes.fijosExtra) || []).map(f => f.id))];
 
-// Los resúmenes de tarjeta se etiquetan con el mes de los gastos (octubre) y se pagan después.
-// desfase = cuántos meses después: con 1, el resumen de octubre cuenta en el Principal de noviembre.
-export const TARJETA_DESFASE_DEFECTO = 1;
-export const desfaseTarjetas = (ajustes) => (ajustes && ajustes.tarjetaDesfase != null) ? Math.max(0, Math.round(n(ajustes.tarjetaDesfase))) : TARJETA_DESFASE_DEFECTO;
-
-// Las obligaciones anteriores a esta fecha se consideran historia (no se muestran como vencidas).
-export const OBLIGACIONES_DESDE_DEFECTO = '2026-11-01';
+// Tarjetas: el resumen etiquetado con un mes (los gastos de noviembre) se paga en el mes SIGUIENTE (diciembre).
+// El período de la obligación es el mes del resumen: el de noviembre vence en diciembre; el de octubre ya venció en noviembre.
+// Las obligaciones con vencimiento anterior a esta fecha se consideran historia (no se muestran como vencidas).
+// 5/11/2026: los resúmenes de octubre (vencían el 3 y 4 de noviembre) ya fueron pagados.
+export const OBLIGACIONES_DESDE_DEFECTO = '2026-11-05';
 export const VENCIMIENTO_MES_SIGUIENTE_DEFECTO = { icbc:true, bna:true, prestamos:true };
 
 const diasEntre = (a, b) => Math.round((new Date(a + 'T12:00:00') - new Date(b + 'T12:00:00')) / 86400000);
@@ -191,16 +189,15 @@ export const resolverMes = (monthly, recurrentes, totalesTarjetas, key, ajustes 
 };
 export const totalFijos = (gastos) => Object.values(gastos||{}).reduce((s,v) => s + n(v), 0);
 
-// Totales de tarjeta por mes de PRINCIPAL (mes del resumen + desfase). El dólar es el del mes del resumen.
-export const calcularTotalesTarjetas = (movimientos, dolarTarjetaMap, desfase = 0) => {
+// Totales de tarjeta por mes del resumen (que es el mes de Principal en el que figura). El dólar es el del mes del resumen.
+export const calcularTotalesTarjetas = (movimientos, dolarTarjetaMap) => {
   const out = {};
   (movimientos||[]).forEach(m => {
     if (!m.mes || !m.tarjeta) return;
     const t = m.tarjeta.toLowerCase(), key = t === 'icbc' ? 'icbc' : t === 'bna' ? 'bna' : null;
     if (!key) return;
-    const destino = desfase ? mesDesplazado(m.mes, desfase) : m.mes;
-    if (!out[destino]) out[destino] = {};
-    out[destino][key] = (out[destino][key] || 0) + montoEnPesos(m, n(dolarTarjetaMap?.[m.mes]) || 0);
+    if (!out[m.mes]) out[m.mes] = {};
+    out[m.mes][key] = (out[m.mes][key] || 0) + montoEnPesos(m, n(dolarTarjetaMap?.[m.mes]) || 0);
   });
   return out;
 };
@@ -251,7 +248,7 @@ const resumenTarjeta = (movs, dolar, tarjeta, mes) => {
 const montoObligacion = ({ k, p, ajustes, monthly, rec, dolar, tarjetasData, tarjetasProvisorias, mesHoy }) => {
   const manual = n(monthly?.[p]?.gastos?.[k]);
   if (esTarjetaClave(k)) {
-    const tarjeta = k.toUpperCase(), rm = mesDesplazado(p, -desfaseTarjetas(ajustes));
+    const tarjeta = k.toUpperCase(), rm = p;      // período = mes del resumen (vence el mes siguiente)
     const def = resumenTarjeta(tarjetasData, dolar, tarjeta, rm);
     if (def.cantidad > 0) return { monto: def.total, tipo: 'definitivo', fuente: 'resumen', mesResumen: rm };
     if (manual > 0) return { monto: manual, tipo: 'definitivo', fuente: 'manual', mesResumen: rm };
@@ -261,7 +258,7 @@ const montoObligacion = ({ k, p, ajustes, monthly, rec, dolar, tarjetasData, tar
     const previos = [...new Set((tarjetasData||[]).filter(m => m.tarjeta === tarjeta && m.mes < rm).map(m => m.mes))].sort();
     if (previos.length) {
       const ult = previos[previos.length-1];
-      return { monto: resumenTarjeta(tarjetasData, dolar, tarjeta, ult).total, tipo: 'provisorio', fuente: 'estimado', mesResumen: rm };
+      return { monto: resumenTarjeta(tarjetasData, dolar, tarjeta, ult).total, tipo: 'provisorio', fuente: 'estimado', mesResumen: rm, basadoEn: ult };
     }
     return null;
   }
@@ -285,7 +282,7 @@ export const generarObligaciones = ({ appData, tarjetasData, tarjetasProvisorias
       const info = montoObligacion({ k, p, ajustes, monthly, rec, dolar, tarjetasData, tarjetasProvisorias, mesHoy });
       if (!info || !(info.monto > 0)) return;
       const fecha = fechaVencimiento(p, v.dia, !!v.mesSiguiente), pago = pagos[`${p}|${k}`];
-      const o = { id: `${p}|${k}`, key: k, periodo: p, fecha, monto: info.monto, tipo: info.tipo, fuente: info.fuente, mesResumen: info.mesResumen || null,
+      const o = { id: `${p}|${k}`, key: k, periodo: p, fecha, monto: info.monto, tipo: info.tipo, fuente: info.fuente, mesResumen: info.mesResumen || null, basadoEn: info.basadoEn || null,
                   pagado: !!pago, fechaPago: pago ? (pago.fecha || hoyStr) : null };
       // Lo provisorio del período siguiente recién se muestra cuando la anterior se pagó o ya venció.
       o.visible = o.tipo === 'definitivo' || !previa || previa.pagado || previa.fecha < hoyStr;
@@ -301,15 +298,35 @@ export const generarObligaciones = ({ appData, tarjetasData, tarjetasProvisorias
   const estimados  = visibles.filter(o => !o.pagado && o.fecha >= hoyStr && o.tipo === 'provisorio');
   const pagadas    = todas.filter(o => o.pagado).sort((a,b) => (b.fechaPago||'').localeCompare(a.fechaPago||''));
   const suma = arr => arr.reduce((s,o) => s + o.monto, 0);
-  const totales = { vencido: suma(vencidas), pendiente: suma(pendientes), estimado: suma(estimados), aPagar: suma(vencidas) + suma(pendientes) };
-  return { todas, vencidas, pendientes, estimados, pagadas, totales };
+  // Agrupación para la pantalla principal (relativa a hoy):
+  const inicioMes = `${mesHoy}-01`, mesSiguiente = mesDesplazado(mesHoy, 1);
+  const vencidasAnteriores = vencidas.filter(o => o.fecha < inicioMes);                       // vencidas e impagas de meses anteriores
+  const delMes = visibles.filter(o => !o.pagado && o.fecha.slice(0,7) === mesHoy);             // vencen este mes (vencidas del mes incluidas)
+  // Mes siguiente: TODO lo impago que vence ese mes (aunque todavía sea provisorio). Es la base de la cobertura.
+  const delMesSiguiente = todas.filter(o => !o.pagado && o.fecha.slice(0,7) === mesSiguiente).sort(porFecha);
+  const masAdelante = visibles.filter(o => !o.pagado && o.fecha.slice(0,7) > mesSiguiente);   // meses posteriores: fuera de la cobertura
+  const clase = o => o.tipo === 'definitivo' ? 'definitivo' : o.fuente === 'movimientos' ? 'temporal' : 'estimado';
+  const sig = { definitivo: 0, temporal: 0, estimado: 0 };
+  delMesSiguiente.forEach(o => { sig[clase(o)] += o.monto; });
+  sig.total = sig.definitivo + sig.temporal + sig.estimado;
+  const totales = { vencido: suma(vencidas), pendiente: suma(pendientes), estimado: suma(estimados), aPagar: suma(vencidas) + suma(pendientes),
+                    vencidoAnterior: suma(vencidasAnteriores), delMes: suma(delMes), masAdelante: suma(masAdelante), mesSiguiente: sig };
+  return { todas, vencidas, pendientes, estimados, pagadas, totales, mesSiguiente, vencidasAnteriores, delMes, delMesSiguiente, masAdelante };
 };
 
-// Cobertura: ¿alcanza lo disponible hoy para pagar lo vencido y lo pendiente (definitivo)? No cuenta el sueldo
-// pendiente de cobro ni lo estimado.
-export const calcularCobertura = ({ disponibilidad, obligaciones }) => {
-  const aPagar = obligaciones.totales.aPagar, balance = disponibilidad.total - aPagar;
-  return { aPagar, disponible: disponibilidad.total, balance, alcanza: balance >= 0 };
+// Cobertura del MES SIGUIENTE. Obligaciones: solo lo impago que vence ese mes (no meses posteriores ni lo vencido de
+// meses anteriores, que va aparte). Se restan, por separado: la disponibilidad real (últimos saldos declarados de Uala
+// + efectivo) y el sueldo PREVISTO de Julieta que paga ese mes (el del mes anterior a las obligaciones, que se cobra el
+// último día hábil), aunque todavía no se haya cobrado. El sueldo NO es dinero disponible: no entra en la disponibilidad.
+export const calcularCoberturaMesSiguiente = ({ appData, obligaciones, disponibilidad, hoyStr }) => {
+  const mes = obligaciones.mesSiguiente, t = obligaciones.totales.mesSiguiente;
+  const mesSueldo = mesDesplazado(mes, -1);
+  const m = resolverMes(appData.monthly, appData.gastosRecurrentes, {}, mesSueldo, appData.ajustes || {});
+  const sueldo = estadoSueldo({ monto: n(m.ingresos.julieta), mesKey: mesSueldo, hoyStr });
+  const sueldoPrevisto = { ...sueldo, mesSueldo };
+  const balance = disponibilidad.total + sueldoPrevisto.monto - t.total;
+  return { mes, items: obligaciones.delMesSiguiente, obligaciones: t, disponible: disponibilidad.total, sueldoPrevisto,
+           balance, falta: Math.max(0, -balance), alcanza: balance >= 0 };
 };
 
 // ── Situación completa (lo único que consumen las pantallas) ────────────
@@ -318,7 +335,7 @@ export const construirSituacion = ({ appData, zapiaData, tarjetasData, tarjetasP
   const finMes = `${mesKey}-31`;
   const hastaFecha = hoyStr < finMes ? hoyStr : finMes;           // disponibilidad "a esa fecha" para meses pasados
   const disponibilidad = calcularDisponibilidad({ saldoJulieta: appData.saldoJulieta, uberDiDi: appData.uberDiDi, hastaFecha });
-  const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, appData.dolarTarjeta, desfaseTarjetas(ajustes));
+  const totalesTarjetas = calcularTotalesTarjetas(tarjetasData, appData.dolarTarjeta);
   const mes = resolverMes(appData.monthly, appData.gastosRecurrentes, totalesTarjetas, mesKey, ajustes);
   const obligaciones = generarObligaciones({ appData, tarjetasData, tarjetasProvisorias, hoyStr });
   return {
@@ -327,7 +344,7 @@ export const construirSituacion = ({ appData, zapiaData, tarjetasData, tarjetasP
     ingresos: { sueldo: estadoSueldo({ monto: n(mes.ingresos.julieta), mesKey, hoyStr }), germanUala: disponibilidad.uala },
     conciliacionUala: { periodos: calcularConciliaciones(appData.saldoJulieta, appData.uberDiDi, zapiaData), abierto: calcularPeriodoAbierto(appData.saldoJulieta, appData.uberDiDi, zapiaData, hoyStr) },
     conciliacionEfectivo: { periodos: calcularConciliacionesEfectivo(appData.uberDiDi, zapiaData), abierto: calcularPeriodoAbiertoEfectivo(appData.uberDiDi, zapiaData, hoyStr) },
-    obligaciones, cobertura: calcularCobertura({ disponibilidad, obligaciones }),
+    obligaciones, cobertura: calcularCoberturaMesSiguiente({ appData, obligaciones, disponibilidad, hoyStr }),
     resultado: calcularResultadoMensual({ appData, zapiaData, tarjetasData, mesKey }),
     ahorro: calcularAhorroManual(appData.ahorroMovimientos),
   };

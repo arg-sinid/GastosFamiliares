@@ -5,7 +5,7 @@ import {
   calcularConciliaciones, calcularPeriodoAbierto, conciliarUala, gastosZapiaDe, esTransferencia,
   calcularConciliacionesEfectivo, declaracionesEfectivo, calcularDisponibilidad,
   calcularResultadoMensual, construirSituacion, generarObligaciones, estadoSueldo,
-  calcularFilaControl, calcularTotalesTarjetas, desfaseTarjetas, fechaVencimiento, resolverMes, armarCierre,
+  calcularFilaControl, calcularTotalesTarjetas, fechaVencimiento, resolverMes, armarCierre,
   calcularHojasExtra, calcularAhorroManual, clavesFijos, calcularFilasControl,
 } from '../src/motor.js';
 import { EMPTY_DATA } from '../src/utils.js';
@@ -132,23 +132,26 @@ test('C: efectivo ≠ Uala (disponibilidad = Uala real + efectivo real, sin tran
   assert.equal(calcularDisponibilidad({ saldoJulieta:{}, uberDiDi:[], hastaFecha:'2026-11-05' }).total, 0);
 });
 
-// ═══ Prueba D — Gastos fijos y vencimientos ══════════════════════════════
+// ═══ Prueba D — Gastos fijos, vencimientos y período de tarjetas ═════════
+// Tarjetas: el resumen de un mes (gastos de noviembre) vence el mes SIGUIENTE (3/12). Su período/ID es el mes del resumen.
 const datosD = (extra = {}) => app({
   vencimientos: { alquiler:{ dia:10, mesSiguiente:false }, icbc:{ dia:3, mesSiguiente:true } },
   gastosRecurrentes: { alquiler: 900000 }, ...extra,
+  ajustes: { obligacionesDesde:'2026-11-01', ...(extra.ajustes || {}) },     // tests históricos; el corte por defecto se prueba aparte
 });
 const icbc = (mes, importe) => ({ id:`t${mes}${importe}`, mes, tarjeta:'ICBC', fecha:`${mes}-10`, comercio:'X', importe, moneda:'ARS', cuotas:'', tipoMovimiento:'consumo' });
 const ob = (appData, hoyStr, def = [], prov = []) => generarObligaciones({ appData, tarjetasData:def, tarjetasProvisorias:prov, hoyStr });
 const porId = (r, id) => r.todas.find(o => o.id === id);
 
-test('D: obligación pendiente antes del vencimiento (alquiler del 10/11) y resumen anterior como obligación actual', () => {
+test('D: el resumen de octubre vence el 3/11 y el de noviembre el 3/12 (cada resumen, su vencimiento)', () => {
   const r = ob(datosD(), '2026-11-02', [ icbc('2026-10', 600000) ]);
+  const oct = porId(r, '2026-10|icbc');
+  assert.equal(oct.monto, 600000); assert.equal(oct.fecha, '2026-11-03'); assert.equal(oct.tipo, 'definitivo'); assert.equal(oct.mesResumen, '2026-10');
+  const nov = porId(r, '2026-11|icbc');
+  assert.equal(nov.fecha, '2026-12-03'); assert.equal(nov.mesResumen, '2026-11');
   const alq = porId(r, '2026-11|alquiler');
-  assert.equal(alq.estado, 'pendiente'); assert.equal(alq.tipo, 'definitivo'); assert.equal(alq.fecha, '2026-11-10');
-  const tar = porId(r, '2026-11|icbc');
-  assert.equal(tar.monto, 600000); assert.equal(tar.fecha, '2026-12-03'); assert.equal(tar.tipo, 'definitivo');
-  assert.equal(porId(r, '2026-12|alquiler').visible, false);
-  assert.deepEqual(r.pendientes.map(o => o.id), ['2026-11|alquiler', '2026-11|icbc']);
+  assert.equal(alq.estado, 'pendiente'); assert.equal(alq.fecha, '2026-11-10');
+  assert.deepEqual(r.pendientes.map(o => o.id), ['2026-10|icbc', '2026-11|alquiler']);
 });
 
 test('D: obligación próxima a vencer (≤ 7 días)', () => {
@@ -157,46 +160,108 @@ test('D: obligación próxima a vencer (≤ 7 días)', () => {
 
 test('D: vencida impaga NO desaparece y el período siguiente aparece como estimado (sin sumarse como dos deudas)', () => {
   const r = ob(datosD(), '2026-11-12', [ icbc('2026-10', 600000) ]);
-  assert.deepEqual(r.vencidas.map(o => o.id), ['2026-11|alquiler']);
+  assert.deepEqual(r.vencidas.map(o => o.id), ['2026-10|icbc', '2026-11|alquiler']);
   assert.equal(porId(r, '2026-11|alquiler').estado, 'vencido');
-  assert.deepEqual(r.estimados.map(o => `${o.id} ${o.monto}`), ['2026-12|alquiler 900000']);
+  assert.deepEqual(r.estimados.map(o => `${o.id} ${o.monto}`), ['2026-11|icbc 600000', '2026-12|alquiler 900000']);
   assert.equal(porId(r, '2026-12|alquiler').tipo, 'provisorio');
-  assert.equal(r.totales.vencido, 900000); assert.equal(r.totales.estimado, 900000);
-  assert.equal(r.totales.aPagar, 900000 + 600000);
+  assert.equal(r.totales.vencido, 600000 + 900000); assert.equal(r.totales.estimado, 600000 + 900000);
+  assert.equal(r.totales.aPagar, 600000 + 900000);
 });
 
 test('D: obligación pagada deja de ser pendiente, se conserva en el historial y habilita el siguiente período', () => {
-  const r = ob(datosD({ pagosFijos:{ '2026-11|alquiler': { fecha:'2026-11-05' } } }), '2026-11-06', [ icbc('2026-10', 600000) ]);
+  const r = ob(datosD({ pagosFijos:{ '2026-11|alquiler': { fecha:'2026-11-05' }, '2026-10|icbc': { fecha:'2026-11-04' } } }), '2026-11-06', [ icbc('2026-10', 600000) ]);
   assert.equal(r.vencidas.length, 0); assert.ok(!r.pendientes.some(o => o.id === '2026-11|alquiler'));
   assert.equal(r.pagadas[0].id, '2026-11|alquiler'); assert.equal(r.pagadas[0].fechaPago, '2026-11-05');
-  assert.deepEqual(r.estimados.map(o => o.id), ['2026-12|alquiler']);
+  assert.deepEqual(r.estimados.map(o => o.id), ['2026-11|icbc', '2026-12|alquiler']);
 });
 
 test('D: no se da por pagado un vencimiento por pasar la fecha ni por empezar un período nuevo', () => {
   const r = ob(datosD(), '2026-12-20', [ icbc('2026-10', 600000) ]);
   assert.ok(r.vencidas.some(o => o.id === '2026-11|alquiler'));
-  assert.ok(r.vencidas.some(o => o.id === '2026-11|icbc'));
+  assert.ok(r.vencidas.some(o => o.id === '2026-10|icbc'));
 });
 
-test('D: tarjetas — el siguiente es provisorio mientras no llega el resumen y el definitivo lo REEMPLAZA (nunca los dos)', () => {
+test('D: tarjetas — temporal mientras no llega el resumen, estimado sin movimientos, y el definitivo REEMPLAZA (nunca los dos)', () => {
   const hoyStr = '2026-12-04', def = [ icbc('2026-10', 600000) ];
   const sinNada = ob(datosD(), hoyStr, def);
-  const est = porId(sinNada, '2026-12|icbc');
-  assert.equal(est.tipo, 'provisorio'); assert.equal(est.fuente, 'estimado'); assert.equal(est.monto, 600000);
+  const est = porId(sinNada, '2026-11|icbc');
+  assert.equal(est.tipo, 'provisorio'); assert.equal(est.fuente, 'estimado'); assert.equal(est.monto, 600000); assert.equal(est.basadoEn, '2026-10');
   assert.ok(sinNada.vencidas.some(o => o.id === '2026-11|icbc'));
   const conMov = ob(datosD(), hoyStr, def, [ { ...icbc('2026-11', 150000), provisorio:true }, { ...icbc('2026-11', 50000), provisorio:true } ]);
-  assert.equal(porId(conMov, '2026-12|icbc').monto, 200000); assert.equal(porId(conMov, '2026-12|icbc').fuente, 'movimientos');
+  assert.equal(porId(conMov, '2026-11|icbc').monto, 200000); assert.equal(porId(conMov, '2026-11|icbc').fuente, 'movimientos');
+  assert.equal(porId(conMov, '2026-11|icbc').basadoEn, null);
   const llego = ob(datosD(), hoyStr, [ ...def, icbc('2026-11', 700000) ], [ { ...icbc('2026-11', 150000), provisorio:true } ]);
-  const dic = porId(llego, '2026-12|icbc');
-  assert.equal(dic.tipo, 'definitivo'); assert.equal(dic.monto, 700000);
-  assert.equal(llego.todas.filter(o => o.id === '2026-12|icbc').length, 1);
-  assert.equal(llego.estimados.some(o => o.key === 'icbc'), false);
+  const nov = porId(llego, '2026-11|icbc');
+  assert.equal(nov.tipo, 'definitivo'); assert.equal(nov.monto, 700000); assert.equal(nov.fuente, 'resumen');
+  assert.equal(llego.todas.filter(o => o.id === '2026-11|icbc').length, 1);
+  assert.equal(llego.estimados.some(o => o.id === '2026-11|icbc'), false);
 });
 
-test('D: lo anterior al inicio de las obligaciones es historia (no aparece como vencido)', () => {
-  const r = ob(datosD({ vencimientos:{ alquiler:{ dia:10, mesSiguiente:false } } }), '2026-11-05');
-  assert.ok(!r.todas.some(o => o.fecha < '2026-11-01'));
+test('D: con el corte por defecto el resumen de octubre (ya pagado, vencía el 3/11) no aparece como obligación', () => {
+  const r = ob(datosD({ ajustes:{ obligacionesDesde: undefined } }), '2026-11-12', [ icbc('2026-10', 600000) ], [ { ...icbc('2026-11', 200000), provisorio:true } ]);
+  assert.ok(!r.todas.some(o => o.id === '2026-10|icbc'));
+  assert.ok(!r.todas.some(o => o.fecha < '2026-11-05'));
+  const nov = porId(r, '2026-11|icbc');
+  assert.equal(nov.fecha, '2026-12-03'); assert.equal(nov.monto, 200000); assert.equal(nov.fuente, 'movimientos');
 });
+
+// ═══ Prueba D2 — Cobertura del mes siguiente y vencidas de meses anteriores ═
+const datosD2 = (extra = {}) => app({
+  vencimientos: { alquiler:{ dia:10, mesSiguiente:false }, icbc:{ dia:3, mesSiguiente:true }, prestamos:{ dia:5, mesSiguiente:false } },
+  gastosRecurrentes: { alquiler: 900000 },
+  monthly: { '2026-10': { gastos:{ prestamos:'50000' } }, '2026-11': { ingresos:{ julieta:'1000000' } } },
+  saldoJulieta: { '2026-11-01': 740000 }, uberDiDi: [ efectivo0 ],
+  ajustes: { obligacionesDesde:'2026-10-01' }, ...extra,
+});
+const sitD2 = (appData, hoyStr = '2026-11-12') => construirSituacion({ appData, zapiaData:[], tarjetasData:[ icbc('2026-10', 600000) ],
+  tarjetasProvisorias:[ { ...icbc('2026-11', 150000), provisorio:true }, { ...icbc('2026-11', 50000), provisorio:true } ], mesKey:'2026-11', hoyStr });
+
+test('D2: la cobertura incluye SOLO lo impago que vence el mes siguiente (no el mes actual, no meses posteriores, no lo vencido)', () => {
+  const s = sitD2(datosD2()), c = s.cobertura;
+  assert.equal(c.mes, '2026-12');
+  assert.deepEqual(c.items.map(o => o.id), ['2026-11|icbc', '2026-12|alquiler']);          // vence el 3/12 y el 10/12
+  assert.equal(c.obligaciones.temporal, 200000); assert.equal(c.obligaciones.estimado, 900000); assert.equal(c.obligaciones.definitivo, 0);
+  assert.equal(c.obligaciones.total, 1100000);
+  // fuera: alquiler vencido de noviembre, préstamo vencido de octubre, y los que vencen desde enero
+  assert.ok(!c.items.some(o => o.fecha.slice(0,7) !== '2026-12'));
+  assert.ok(s.obligaciones.masAdelante.every(o => o.fecha >= '2027-01-01'));
+  assert.equal(s.obligaciones.totales.masAdelante, s.obligaciones.masAdelante.reduce((a,o) => a + o.monto, 0));
+});
+
+test('D2: falta = obligaciones − disponibilidad real − sueldo previsto (componentes por separado; el sueldo no es disponibilidad)', () => {
+  const s = sitD2(datosD2()), c = s.cobertura;
+  assert.equal(s.disponibilidad.total, 790000); assert.equal(c.disponible, 790000);           // el sueldo NO suma a la disponibilidad
+  assert.equal(c.sueldoPrevisto.monto, 1000000); assert.equal(c.sueldoPrevisto.mesSueldo, '2026-11');
+  assert.equal(c.sueldoPrevisto.estado, 'pendiente'); assert.equal(c.sueldoPrevisto.fechaCobro, '2026-11-30');
+  assert.equal(c.balance, 790000 + 1000000 - 1100000); assert.equal(c.alcanza, true); assert.equal(c.falta, 0);
+  const sin = sitD2(datosD2({ monthly:{ '2026-10': { gastos:{ prestamos:'50000' } } }, saldoJulieta:{ '2026-11-01':100000 }, uberDiDi:[] })).cobertura;
+  assert.equal(sin.sueldoPrevisto.monto, 0); assert.equal(sin.falta, 1100000 - 100000); assert.equal(sin.alcanza, false);
+  assert.equal(sitD2(datosD2(), '2026-11-30').cobertura.sueldoPrevisto.estado, 'cobrado');
+});
+
+test('D2: lo vencido e impago de meses anteriores va en un bloque aparte con su total y NO entra en la cobertura', () => {
+  const s = sitD2(datosD2()), o = s.obligaciones;
+  assert.deepEqual(o.vencidasAnteriores.map(x => x.id), ['2026-10|prestamos', '2026-10|alquiler']);   // vencieron el 5/10 y el 10/10
+  assert.equal(o.totales.vencidoAnterior, 50000 + 900000);
+  o.vencidasAnteriores.forEach(x => { assert.ok(x.periodo && x.key && x.fecha && x.monto > 0); assert.equal(x.estado, 'vencido'); });
+  assert.deepEqual(o.delMes.map(x => x.id), ['2026-10|icbc', '2026-11|alquiler']);                    // vencidas de ESTE mes: otra sección
+  assert.ok(!s.cobertura.items.some(x => o.vencidasAnteriores.includes(x)));
+  // pagar una la saca del bloque
+  const pago = sitD2(datosD2({ pagosFijos:{ '2026-10|prestamos': { fecha:'2026-11-12' } } })).obligaciones;
+  assert.deepEqual(pago.vencidasAnteriores.map(x => x.id), ['2026-10|alquiler']); assert.equal(pago.totales.vencidoAnterior, 900000);
+});
+
+test('D2: al llegar el resumen definitivo de noviembre reemplaza a los temporales (sin duplicar movimientos ni importes)', () => {
+  const s = construirSituacion({ appData: datosD2(), zapiaData:[], tarjetasData:[ icbc('2026-10', 600000), icbc('2026-11', 700000) ],
+    tarjetasProvisorias:[ { ...icbc('2026-11', 150000), provisorio:true }, { ...icbc('2026-11', 50000), provisorio:true } ], mesKey:'2026-11', hoyStr:'2026-11-12' });
+  const nov = s.cobertura.items.find(o => o.id === '2026-11|icbc');
+  assert.equal(nov.monto, 700000); assert.equal(nov.tipo, 'definitivo'); assert.equal(nov.fuente, 'resumen');
+  assert.equal(s.cobertura.obligaciones.temporal, 0); assert.equal(s.cobertura.obligaciones.definitivo, 700000);
+  assert.equal(s.cobertura.items.filter(o => o.key === 'icbc').length, 1);
+  assert.equal(s.cobertura.obligaciones.total, 700000 + 900000);
+});
+
+
 
 test('D: un gasto fijo sin fecha cargada no es una obligación; uno nuevo con fecha sí', () => {
   const a = datosD({ ajustes:{ fijosExtra:[ { id:'x1', label:'Gimnasio' } ] }, gastosRecurrentes:{ alquiler:900000, x1:25000 }, vencimientos:{ x1:{ dia:8, mesSiguiente:false } } });
@@ -249,10 +314,10 @@ test('E: Principal, Control y Cierre usan el mismo resultado (una sola función)
   assert.equal(calcularFilasControl(ctx).length, 1);
 });
 
-test('E: cobertura (disponible contra lo vencido y lo pendiente; no cuenta estimados ni sueldo pendiente)', () => {
+test('E: cobertura del mes siguiente (obligaciones de ese mes − disponibilidad − sueldo previsto) y estado del sueldo', () => {
   const s = construirSituacion({ appData: appE, zapiaData: zapE, tarjetasData: tarE, mesKey: '2026-11', hoyStr: '2026-11-08' });
-  assert.equal(s.cobertura.aPagar, s.obligaciones.totales.aPagar);
-  assert.equal(s.cobertura.balance, s.cobertura.disponible - s.cobertura.aPagar);
+  assert.equal(s.cobertura.obligaciones.total, s.obligaciones.totales.mesSiguiente.total);
+  assert.equal(s.cobertura.balance, s.cobertura.disponible + s.cobertura.sueldoPrevisto.monto - s.cobertura.obligaciones.total);
   const sq = estadoSueldo({ monto: 1000000, mesKey: '2026-11', hoyStr: '2026-11-08' });
   assert.equal(sq.estado, 'pendiente'); assert.equal(sq.fechaCobro, '2026-11-30');
   assert.equal(estadoSueldo({ monto: 1, mesKey: '2026-11', hoyStr: '2026-11-30' }).estado, 'cobrado');
@@ -267,11 +332,10 @@ test('E: el cierre guarda una foto y las tablas de Google Sheets salen del mismo
   Object.values(h).forEach(t => t.rows.forEach(r => assert.equal(r.length, t.headers.length)));
 });
 
-test('invariantes: ahorro manual, claves de fijos, desfase de tarjetas y sueldo recurrente', () => {
+test('invariantes: ahorro manual, claves de fijos, totales de tarjeta por mes del resumen y sueldo recurrente', () => {
   assert.equal(calcularAhorroManual([ { tipo:'ingreso_extra', monto:100, fecha:'2026-01-01' }, { tipo:'retiro', monto:30, fecha:'2026-01-02' } ]), 70);
   assert.deepEqual(clavesFijos({ fijosExtra:[ { id:'x' } ] }).slice(-2), ['alquiler','x']);
-  assert.equal(desfaseTarjetas(undefined), 1); assert.equal(desfaseTarjetas({ tarjetaDesfase:0 }), 0);
-  assert.deepEqual(calcularTotalesTarjetas([ { mes:'2026-10', tarjeta:'ICBC', importe:10, moneda:'USD' } ], { '2026-10':1000 }, 1), { '2026-11': { icbc:10000 } });
+  assert.deepEqual(calcularTotalesTarjetas([ { mes:'2026-10', tarjeta:'ICBC', importe:10, moneda:'USD' } ], { '2026-10':1000 }), { '2026-10': { icbc:10000 } });
   assert.equal(resolverMes({}, {}, {}, '2026-12', { sueldoJulieta:1600000 }).ingresos.julieta, '1600000');
 });
 

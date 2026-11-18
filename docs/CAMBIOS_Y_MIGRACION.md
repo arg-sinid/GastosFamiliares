@@ -1,3 +1,25 @@
+# v7.1 — Cobertura del mes siguiente, vencidas aparte y período de tarjetas
+
+**Período de tarjetas (corrección).** El resumen de un mes (los gastos de noviembre) vence el mes SIGUIENTE (3/12). El período/ID de la
+obligación es el mes del resumen (`2026-11|icbc`). El resumen de octubre vencía el 3/11 y ya está pagado: el corte por defecto de
+obligaciones pasó a `2026-11-05`, así que no aparece como obligación. Se eliminó el ajuste "desfase de tarjetas" (`ajustes.tarjetaDesfase`
+queda ignorado): en el Principal de noviembre figura el resumen de noviembre.
+
+**Importes de tarjeta, en este orden:** resumen definitivo → importe manual → **Temporal de noviembre** (movimientos provisorios) →
+**Estimado** (último resumen anterior, con "basado en el resumen de …"). Al llegar el definitivo reemplaza a lo anterior: nunca se suman.
+
+**Principal.**
+- *Cobertura de {mes siguiente}*: obligaciones impagas que vencen ESE mes (definitivas / temporales / estimadas, por separado) − disponibilidad real − sueldo previsto de Julieta.
+  El sueldo previsto es el del mes anterior al de las obligaciones (el de noviembre, que se cobra el último día hábil, paga diciembre); se muestra aparte y aclarado como no disponible. No incluye meses posteriores ni lo vencido de meses anteriores.
+- *Vencidas de meses anteriores*: bloque aparte con total; al tocarlo lista período, concepto, vencimiento e importe. No entra en la cobertura.
+- *Vencen en {mes actual}* (incluye lo vencido este mes que sigue impago) y *Más adelante* (fuera de la cobertura).
+
+**Gastos > Tarjetas.** Mes sin resumen definitivo: cada tarjeta se muestra como "Temporal de {mes}" (provisorio), con su vencimiento; el detalle lista cada movimiento con su categoría. No suman en Gastos ni en el resultado. Tocar la tarjeta desde Principal abre ese detalle del mes del resumen.
+
+**No cambia:** resultado mensual, conciliaciones de Uala y efectivo, disponibilidad, ahorro, sincronización, backend (sigue 7.0).
+
+---
+
 # GastosFamiliares v7.0 — arquitectura, fórmulas, migración y límites
 
 ## 1. Diagnóstico (qué estaba mal en la v6)
